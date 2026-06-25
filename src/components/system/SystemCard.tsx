@@ -1,0 +1,3 @@
+import type { ReactNode } from "react";
+interface Props { readonly eyebrow: string; readonly title: string; readonly detail: string; readonly status?: ReactNode; }
+export function SystemCard({ eyebrow, title, detail, status }: Props) { return <article className="rounded-[var(--theme-radius)] border border-[var(--theme-border)] bg-[var(--theme-surface)] p-5 shadow-[var(--theme-shadow)]"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--theme-text-muted)]">{eyebrow}</p><h2 className="mt-2 text-lg font-semibold text-[var(--theme-text)]">{title}</h2></div>{status}</div><p className="mt-4 text-sm leading-6 text-[var(--theme-text-muted)]">{detail}</p></article>; }

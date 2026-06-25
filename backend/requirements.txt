@@ -1,0 +1,4 @@
+fastapi==0.115.12
+SQLAlchemy==2.0.41
+uvicorn[standard]==0.34.2
+weasyprint==65.1

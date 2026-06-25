@@ -1,0 +1,10 @@
+node_modules/
+dist/
+target/
+.venv/
+__pycache__/
+*.py[cod]
+.env
+data/
+tmp/
+src-tauri/target/

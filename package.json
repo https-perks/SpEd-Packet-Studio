@@ -1,0 +1,34 @@
+{
+  "name": "sped-packet-studio",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "frontend:dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "desktop:dev": "node scripts/dev.mjs",
+    "backend:dev": "python -m backend",
+    "backend:check": "python -m compileall backend",
+    "backend:test": "python -m unittest discover -s backend/tests -v"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.8.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.14",
+    "@tauri-apps/cli": "^2.8.4",
+    "@types/node": "^24.7.2",
+    "@types/react": "^19.1.16",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.4",
+    "tailwindcss": "^4.1.14",
+    "typescript": "~5.9.3",
+    "vite": "^7.1.9"
+  },
+  "packageManager": "pnpm@10.18.3"
+}
