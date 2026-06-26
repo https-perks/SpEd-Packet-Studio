@@ -10,7 +10,14 @@ os.environ["PACKET_STUDIO_ENV"] = "test"
 
 from backend.database.migrations.runner import run_migrations
 from backend.database.session import SessionLocal, engine
-from backend.schemas.projects import AtAGlanceDraft, GoalsDraft, StudentSetupDraft
+from backend.generators.pdf import renderer_available
+from backend.schemas.projects import (
+    AtAGlanceDraft,
+    DataSheetsDraft,
+    GoalsDraft,
+    StudentSetupDraft,
+    ThemeSelection,
+)
 from backend.services import projects
 
 
@@ -100,9 +107,84 @@ class ProjectWorkflowTests(unittest.TestCase):
             )
             detail = projects.save_at_a_glance(session, created.id, glance)
             self.assertTrue(detail.at_a_glance_validation.is_complete)
+            self.assertFalse(detail.data_sheets_validation.is_complete)
+
+            data_sheets = DataSheetsDraft.model_validate(
+                {
+                    "data_sheets": [
+                        {
+                            "title": "Reading Fluency Weekly Probe",
+                            "sheet_type": "trial_count",
+                            "goal_ids": [detail.goals[0].id],
+                            "collection_schedule": "Weekly, 3 passages",
+                            "blank_instance_count": 4,
+                            "columns": [
+                                {
+                                    "id": "date",
+                                    "title": "Date",
+                                    "column_type": "date",
+                                    "position": 0,
+                                },
+                                {
+                                    "id": "wpm",
+                                    "title": "WPM",
+                                    "column_type": "number",
+                                    "position": 1,
+                                },
+                                {
+                                    "id": "accuracy",
+                                    "title": "Accuracy",
+                                    "column_type": "number",
+                                    "position": 2,
+                                },
+                            ],
+                            "notes": "Use the goal summary as the target.",
+                            "position": 0,
+                        }
+                    ]
+                }
+            )
+            detail = projects.save_data_sheets(session, created.id, data_sheets)
+            self.assertTrue(detail.data_sheets_validation.is_complete)
+            self.assertEqual(detail.data_sheets[0].goal_ids, [detail.goals[0].id])
+            self.assertEqual(detail.data_sheets[0].blank_instance_count, 4)
+            self.assertEqual(len(detail.packet_versions), 2)
+            self.assertEqual(
+                [column.title for column in detail.data_sheets[0].columns],
+                ["Date", "WPM", "Accuracy"],
+            )
+            detail = projects.save_project_theme(
+                session,
+                created.id,
+                ThemeSelection(theme_id="teacher_friendly"),
+            )
+            self.assertEqual(detail.theme_id, "teacher_friendly")
 
             duplicate = projects.duplicate_project(session, created.id)
             self.assertEqual(len(duplicate.goals), 1)
+            self.assertEqual(len(duplicate.data_sheets), 1)
+            self.assertEqual(
+                duplicate.data_sheets[0].goal_ids,
+                [duplicate.goals[0].id],
+            )
+            self.assertEqual(duplicate.data_sheets[0].blank_instance_count, 4)
+
+            if renderer_available():
+                export = projects.generate_pdf_export(session, created.id)
+                export_path = TEST_DATA_DIR / export.relative_path
+                self.assertTrue(export_path.exists())
+                self.assertGreater(export.size_bytes, 1000)
+                self.assertEqual(export_path.read_bytes()[:4], b"%PDF")
+                self.assertTrue(
+                    export.download_url.endswith(f"/exports/{export.id}/download")
+                )
+            else:
+                self.skipTest("WeasyPrint native rendering libraries are not installed.")
+
+            backup = projects.create_project_backup(session, created.id)
+            backup_path = TEST_DATA_DIR / backup.relative_path
+            self.assertTrue(backup_path.exists())
+            self.assertGreater(backup.size_bytes, 1000)
 
             archived = projects.set_archived(session, created.id, True)
             self.assertTrue(archived.archived)

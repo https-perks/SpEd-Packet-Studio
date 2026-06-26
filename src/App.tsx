@@ -2,14 +2,17 @@ import { useCallback, useState } from "react";
 import { AppShell } from "./layouts/AppShell";
 import { AtAGlancePage } from "./pages/AtAGlancePage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { DataSheetBuilderPage } from "./pages/DataSheetBuilderPage";
 import { GoalBuilderPage } from "./pages/GoalBuilderPage";
+import { PacketDesignerPage } from "./pages/PacketDesignerPage";
+import { ReviewExportPage } from "./pages/ReviewExportPage";
 import { StudentSetupPage } from "./pages/StudentSetupPage";
 import { getProject } from "./services/api/projects";
 import type { AppScreen } from "./types/navigation";
 import type { ProjectDetail, ProjectSummary } from "./types/projects";
 
 function stepToScreen(step: ProjectSummary["current_step"]): AppScreen {
-  if (step === "complete") return "at_a_glance";
+  if (step === "complete") return "review";
   return step;
 }
 
@@ -56,16 +59,65 @@ export function App() {
           return;
         }
       }
+      if (target === "data_sheets") {
+        if (!project.student_setup_validation.is_complete) {
+          setScreen("student_setup");
+          return;
+        }
+        if (!project.goals_validation.is_complete) {
+          setScreen("goals");
+          return;
+        }
+        if (!project.at_a_glance_validation.is_complete) {
+          setScreen("at_a_glance");
+          return;
+        }
+      }
+      if (target === "packet_designer") {
+        if (!project.student_setup_validation.is_complete) {
+          setScreen("student_setup");
+          return;
+        }
+        if (!project.goals_validation.is_complete) {
+          setScreen("goals");
+          return;
+        }
+        if (!project.at_a_glance_validation.is_complete) {
+          setScreen("at_a_glance");
+          return;
+        }
+        if (!project.data_sheets_validation.is_complete) {
+          setScreen("data_sheets");
+          return;
+        }
+      }
+      if (target === "review") {
+        if (!project.student_setup_validation.is_complete) {
+          setScreen("student_setup");
+          return;
+        }
+        if (!project.goals_validation.is_complete) {
+          setScreen("goals");
+          return;
+        }
+        if (!project.at_a_glance_validation.is_complete) {
+          setScreen("at_a_glance");
+          return;
+        }
+        if (!project.data_sheets_validation.is_complete) {
+          setScreen("data_sheets");
+          return;
+        }
+      }
       setScreen(target);
     },
     [project],
   );
 
-  function finishSprintOne() {
+  function markSprintFourExported() {
     setNotice(
-      "Sprint 1 is complete for this project. Data Sheet Builder will become available in Sprint 2.",
+      "Sprint 4 export generated successfully.",
     );
-    setScreen("dashboard");
   }
 
   let content;
@@ -106,14 +158,43 @@ export function App() {
         onContinue={() => setScreen("at_a_glance")}
       />
     );
-  } else {
+  } else if (screen === "at_a_glance") {
     content = (
       <AtAGlancePage
         key={`${project.id}-glance`}
         project={project}
         onProjectUpdate={setProject}
         onBack={() => setScreen("goals")}
-        onComplete={finishSprintOne}
+        onComplete={() => setScreen("data_sheets")}
+      />
+    );
+  } else if (screen === "data_sheets") {
+    content = (
+      <DataSheetBuilderPage
+        key={`${project.id}-data-sheets`}
+        project={project}
+        onProjectUpdate={setProject}
+        onBack={() => setScreen("at_a_glance")}
+        onComplete={() => setScreen("packet_designer")}
+      />
+    );
+  } else if (screen === "packet_designer") {
+    content = (
+      <PacketDesignerPage
+        key={`${project.id}-packet-designer`}
+        project={project}
+        onBack={() => setScreen("data_sheets")}
+        onComplete={() => setScreen("review")}
+      />
+    );
+  } else {
+    content = (
+      <ReviewExportPage
+        key={`${project.id}-review-export`}
+        project={project}
+        onProjectUpdate={setProject}
+        onBack={() => setScreen("packet_designer")}
+        onComplete={markSprintFourExported}
       />
     );
   }

@@ -9,7 +9,7 @@ class Settings:
     app_name: str = "SpEd Packet Studio"
     app_version: str = "0.0.0"
     api_version: str = "1"
-    schema_version: str = "0.3.0"
+    schema_version: str = "0.6.0"
     environment: str = os.getenv("PACKET_STUDIO_ENV", "development")
     api_host: str = os.getenv("PACKET_STUDIO_API_HOST", "127.0.0.1")
     api_port: int = int(os.getenv("PACKET_STUDIO_API_PORT", "8765"))

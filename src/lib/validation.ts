@@ -1,5 +1,6 @@
 import type {
   AtAGlanceSection,
+  DataSheetDraft,
   GoalDraft,
   StepValidation,
   StudentSetupDraft,
@@ -31,6 +32,7 @@ export function validateGoals(goals: readonly GoalDraft[]): StepValidation {
   const fields: readonly [keyof GoalDraft, string][] = [
     ["title", "Enter a goal title."],
     ["statement", "Enter the complete goal statement."],
+    ["data_sheet_summary", "Enter a concise summary for future data sheets."],
     ["service_area_id", "Assign the goal to a service area."],
     ["mastery_criteria", "Enter mastery criteria."],
     ["progress_monitoring_method", "Enter a progress-monitoring method."],
@@ -40,6 +42,50 @@ export function validateGoals(goals: readonly GoalDraft[]): StepValidation {
       const value = goal[field];
       if (value === null || !String(value).trim()) {
         issues.push({ field: `goals.${index}.${field}`, message });
+      }
+    });
+  });
+  return { is_complete: issues.length === 0, issues };
+}
+
+export function validateDataSheets(
+  dataSheets: readonly DataSheetDraft[],
+): StepValidation {
+  const issues: ValidationIssue[] = [];
+  if (!dataSheets.length) {
+    issues.push({
+      field: "data_sheets",
+      message: "Add at least one data sheet for progress monitoring.",
+    });
+  }
+  dataSheets.forEach((sheet, index) => {
+    if (!sheet.title.trim()) {
+      issues.push({ field: `data_sheets.${index}.title`, message: "Enter a data sheet title." });
+    }
+    if (!sheet.sheet_type) {
+      issues.push({ field: `data_sheets.${index}.sheet_type`, message: "Choose a data collection type." });
+    }
+    if (!sheet.collection_schedule.trim()) {
+      issues.push({ field: `data_sheets.${index}.collection_schedule`, message: "Enter a collection schedule." });
+    }
+    if (sheet.blank_instance_count < 1) {
+      issues.push({
+        field: `data_sheets.${index}.blank_instance_count`,
+        message: "Enter at least one blank table instance for the packet.",
+      });
+    }
+    if (!sheet.goal_ids.length) {
+      issues.push({ field: `data_sheets.${index}.goal_ids`, message: "Attach at least one goal." });
+    }
+    if (!sheet.columns.length) {
+      issues.push({ field: `data_sheets.${index}.columns`, message: "Add at least one table column." });
+    }
+    sheet.columns.forEach((column, columnIndex) => {
+      if (!column.title.trim()) {
+        issues.push({
+          field: `data_sheets.${index}.columns.${columnIndex}.title`,
+          message: "Enter a title for every table column.",
+        });
       }
     });
   });

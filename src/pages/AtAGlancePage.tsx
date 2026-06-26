@@ -14,7 +14,6 @@ const defaultSections: readonly Omit<AtAGlanceSection, "position">[] = [
   { id: "interests", title: "Interests & Motivators", content: "", enabled: true },
   { id: "needs", title: "Areas of Need", content: "", enabled: true },
   { id: "strategies", title: "Effective Strategies", content: "", enabled: true },
-  { id: "supports", title: "Accommodations & Supports", content: "", enabled: true },
   { id: "communication", title: "Communication Tips", content: "", enabled: true },
   { id: "behavior", title: "Behavioral Supports", content: "", enabled: true },
   { id: "safety", title: "Medical or Safety Considerations", content: "", enabled: true },
@@ -23,7 +22,9 @@ const defaultSections: readonly Omit<AtAGlanceSection, "position">[] = [
 
 function initialSections(project: ProjectDetail): AtAGlanceSection[] {
   if (project.at_a_glance.sections.length) {
-    return project.at_a_glance.sections.map((section) => ({ ...section }));
+    return project.at_a_glance.sections
+      .filter((section) => section.id !== "supports")
+      .map((section, position) => ({ ...section, position }));
   }
   return defaultSections.map((section, position) => ({ ...section, position }));
 }
@@ -94,7 +95,7 @@ export function AtAGlancePage({
   return (
     <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
       <WorkflowHeader
-        eyebrow="Step 3 of 3"
+        eyebrow="Step 3 of 6"
         title="At-a-Glance Builder"
         description="Create a concise, practical summary that educators can read in under one minute."
         status={autosave.status}

@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from backend.schemas.system import ApiSchema
 
@@ -37,6 +37,11 @@ class StudentDraft(ApiSchema):
     case_manager: str = Field(default="", max_length=200)
     iep_end_date: date | None = None
 
+    @field_validator("iep_end_date", mode="before")
+    @classmethod
+    def normalize_blank_date(cls, value: object) -> object:
+        return None if value == "" else value
+
 
 class ServiceAreaDraft(ApiSchema):
     id: str | None = None
@@ -46,6 +51,11 @@ class ServiceAreaDraft(ApiSchema):
     delivery_model: DeliveryModel | None = None
     notes: str = ""
     position: int = Field(default=0, ge=0)
+
+    @field_validator("id", "delivery_model", "minutes_per_week", mode="before")
+    @classmethod
+    def normalize_blank_optional_values(cls, value: object) -> object:
+        return None if value == "" else value
 
 
 class StudentSetupDraft(ApiSchema):
@@ -101,6 +111,77 @@ class AtAGlanceResponse(ApiSchema):
     sections: list[AtAGlanceSectionDraft] = Field(default_factory=list)
 
 
+DataSheetType = Literal["trial_count", "frequency", "duration", "rubric", "notes"]
+DataSheetColumnType = Literal["text", "number", "date", "checkbox", "notes"]
+
+
+class DataSheetColumnDraft(ApiSchema):
+    id: str = Field(max_length=80)
+    title: str = Field(default="", max_length=120)
+    column_type: DataSheetColumnType = "text"
+    position: int = Field(default=0, ge=0)
+
+
+class DataSheetDraft(ApiSchema):
+    id: str | None = None
+    title: str = Field(default="", max_length=240)
+    sheet_type: DataSheetType | None = None
+    goal_ids: list[str] = Field(default_factory=list)
+    collection_schedule: str = Field(default="", max_length=240)
+    blank_instance_count: int = Field(default=1, ge=1, le=100)
+    columns: list[DataSheetColumnDraft] = Field(default_factory=list)
+    notes: str = ""
+    position: int = Field(default=0, ge=0)
+
+
+class DataSheetsDraft(ApiSchema):
+    data_sheets: list[DataSheetDraft] = Field(default_factory=list)
+
+
+class DataSheetResponse(DataSheetDraft):
+    id: str
+
+
+class ExportResponse(ApiSchema):
+    id: str
+    filename: str
+    relative_path: str
+    absolute_path: str
+    generated_at: datetime
+    content_hash: str
+    size_bytes: int
+    download_url: str
+
+
+class ExportRequest(ApiSchema):
+    packet_version_id: str | None = None
+    theme_id: str = "teacher_friendly"
+
+
+class PacketVersionResponse(ApiSchema):
+    id: str
+    name: str
+    audience: str
+
+
+class ThemeOption(ApiSchema):
+    id: str
+    name: str
+    description: str
+
+
+class ThemeSelection(ApiSchema):
+    theme_id: str = "teacher_friendly"
+
+
+class BackupResponse(ApiSchema):
+    filename: str
+    relative_path: str
+    absolute_path: str
+    created_at: datetime
+    size_bytes: int
+
+
 class ProjectSummary(ApiSchema):
     id: str
     name: str
@@ -109,7 +190,7 @@ class ProjectSummary(ApiSchema):
     grade: str
     updated_at: datetime
     archived: bool
-    current_step: Literal["student_setup", "goals", "at_a_glance", "complete"]
+    current_step: Literal["student_setup", "goals", "at_a_glance", "data_sheets", "complete"]
 
 
 class ProjectDetail(ApiSchema):
@@ -120,9 +201,13 @@ class ProjectDetail(ApiSchema):
     student: StudentResponse | None
     service_areas: list[ServiceAreaResponse]
     audiences: list[Audience]
+    packet_versions: list[PacketVersionResponse]
+    theme_id: str
     goals: list[GoalResponse]
     at_a_glance: AtAGlanceResponse
+    data_sheets: list[DataSheetResponse]
     student_setup_validation: StepValidation
     goals_validation: StepValidation
     at_a_glance_validation: StepValidation
+    data_sheets_validation: StepValidation
     updated_at: datetime

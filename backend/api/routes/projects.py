@@ -1,18 +1,30 @@
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from backend.database.session import get_session
 from backend.schemas.projects import (
     AtAGlanceDraft,
+    BackupResponse,
+    DataSheetsDraft,
+    ExportRequest,
+    ExportResponse,
     GoalsDraft,
     ProjectCreate,
     ProjectDetail,
     ProjectSummary,
     StudentSetupDraft,
+    ThemeOption,
+    ThemeSelection,
 )
 from backend.services import projects
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+@router.get("/themes", response_model=list[ThemeOption])
+def list_themes() -> list[ThemeOption]:
+    return projects.list_themes()
 
 
 @router.get("", response_model=list[ProjectSummary])
@@ -63,6 +75,51 @@ def save_at_a_glance(
     session: Session = Depends(get_session),
 ) -> ProjectDetail:
     return projects.save_at_a_glance(session, project_id, value)
+
+
+@router.put("/{project_id}/data-sheets", response_model=ProjectDetail)
+def save_data_sheets(
+    project_id: str,
+    value: DataSheetsDraft,
+    session: Session = Depends(get_session),
+) -> ProjectDetail:
+    return projects.save_data_sheets(session, project_id, value)
+
+
+@router.put("/{project_id}/theme", response_model=ProjectDetail)
+def save_project_theme(
+    project_id: str,
+    value: ThemeSelection,
+    session: Session = Depends(get_session),
+) -> ProjectDetail:
+    return projects.save_project_theme(session, project_id, value)
+
+
+@router.post("/{project_id}/exports/pdf", response_model=ExportResponse, status_code=201)
+def generate_pdf_export(
+    project_id: str,
+    value: ExportRequest | None = None,
+    session: Session = Depends(get_session),
+) -> ExportResponse:
+    return projects.generate_pdf_export(session, project_id, value)
+
+
+@router.post("/{project_id}/backup", response_model=BackupResponse, status_code=201)
+def create_project_backup(
+    project_id: str,
+    session: Session = Depends(get_session),
+) -> BackupResponse:
+    return projects.create_project_backup(session, project_id)
+
+
+@router.get("/{project_id}/exports/{export_id}/download")
+def download_export(
+    project_id: str,
+    export_id: str,
+    session: Session = Depends(get_session),
+) -> FileResponse:
+    path = projects.get_export_path(session, project_id, export_id)
+    return FileResponse(path, media_type="application/pdf", filename=path.name)
 
 
 @router.post("/{project_id}/duplicate", response_model=ProjectDetail, status_code=201)

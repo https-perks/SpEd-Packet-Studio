@@ -1,0 +1,160 @@
+Date : 2026-06-26 14:32:38
+Directory : c:\Users\Ryan\Documents\SpEd Packet Studio
+Total : 86 files,  11179 codes, 249 comments, 894 blanks, all 12322 lines
+
+Languages
++--------------------+------------+------------+------------+------------+------------+
+| language           | files      | code       | comment    | blank      | total      |
++--------------------+------------+------------+------------+------------+------------+
+| JSON               |          9 |      4,658 |          0 |          5 |      4,663 |
+| TypeScript JSX     |         20 |      2,543 |          0 |        175 |      2,718 |
+| Python             |         32 |      2,070 |        248 |        286 |      2,604 |
+| YAML               |          2 |      1,260 |          0 |        341 |      1,601 |
+| TypeScript         |         13 |        499 |          1 |         54 |        554 |
+| Markdown           |          2 |         44 |          0 |         17 |         61 |
+| Rust               |          3 |         38 |          0 |          8 |         46 |
+| JavaScript         |          1 |         33 |          0 |          3 |         36 |
+| PostCSS            |          1 |         16 |          0 |          2 |         18 |
+| HTML               |          1 |         13 |          0 |          1 |         14 |
+| pip requirements   |          1 |          4 |          0 |          1 |          5 |
+| JSON with Comments |          1 |          1 |          0 |          1 |          2 |
++--------------------+------------+------------+------------+------------+------------+
+
+Directories
++-------------------------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| path                                                                                                  | files      | code       | comment    | blank      | total      |
++-------------------------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| .                                                                                                     |         86 |     11,179 |        249 |        894 |     12,322 |
+| . (Files)                                                                                             |          9 |      1,387 |          0 |        363 |      1,750 |
+| backend                                                                                               |         33 |      2,074 |        248 |        287 |      2,609 |
+| backend (Files)                                                                                       |          5 |         56 |          1 |         14 |         71 |
+| backend\api                                                                                           |          5 |        128 |          2 |         38 |        168 |
+| backend\api (Files)                                                                                   |          2 |          6 |          1 |          2 |          9 |
+| backend\api\routes                                                                                    |          3 |        122 |          1 |         36 |        159 |
+| backend\database                                                                                      |         10 |         82 |          3 |         21 |        106 |
+| backend\database (Files)                                                                              |          4 |         24 |          1 |          5 |         30 |
+| backend\database\migrations                                                                           |          6 |         58 |          2 |         16 |         76 |
+| backend\database\migrations (Files)                                                                   |          2 |         22 |          1 |          3 |         26 |
+| backend\database\migrations\versions                                                                  |          4 |         36 |          1 |         13 |         50 |
+| backend\generators                                                                                    |          2 |         20 |          1 |          8 |         29 |
+| backend\models                                                                                        |          3 |        100 |          0 |         18 |        118 |
+| backend\schemas                                                                                       |          3 |        168 |          1 |         62 |        231 |
+| backend\services                                                                                      |          3 |      1,333 |        239 |        111 |      1,683 |
+| backend\tests                                                                                         |          2 |        187 |          1 |         15 |        203 |
+| scripts                                                                                               |          1 |         33 |          0 |          3 |         36 |
+| src                                                                                                   |         33 |      3,044 |          1 |        229 |      3,274 |
+| src (Files)                                                                                           |          4 |        224 |          1 |         13 |        238 |
+| src-tauri                                                                                             |          9 |      4,639 |          0 |         10 |      4,649 |
+| src-tauri (Files)                                                                                     |          2 |         11 |          0 |          2 |         13 |
+| src-tauri\capabilities                                                                                |          1 |          5 |          0 |          1 |          6 |
+| src-tauri\gen                                                                                         |          4 |      4,586 |          0 |          0 |      4,586 |
+| src-tauri\gen\schemas                                                                                 |          4 |      4,586 |          0 |          0 |      4,586 |
+| src-tauri\src                                                                                         |          2 |         37 |          0 |          7 |         44 |
+| src\components                                                                                        |          8 |        204 |          0 |         24 |        228 |
+| src\components\system                                                                                 |          2 |          7 |          0 |          2 |          9 |
+| src\components\ui                                                                                     |          3 |        113 |          0 |         15 |        128 |
+| src\components\workflow                                                                               |          3 |         84 |          0 |          7 |         91 |
+| src\hooks                                                                                             |          2 |         33 |          0 |          2 |         35 |
+| src\layouts                                                                                           |          1 |         36 |          0 |          3 |         39 |
+| src\lib                                                                                               |          1 |        106 |          0 |          5 |        111 |
+| src\navigation                                                                                        |          1 |         10 |          0 |          1 |         11 |
+| src\pages                                                                                             |          8 |      2,089 |          0 |        137 |      2,226 |
+| src\services                                                                                          |          3 |        172 |          0 |         22 |        194 |
+| src\services\api                                                                                      |          3 |        172 |          0 |         22 |        194 |
+| src\themes                                                                                            |          2 |          8 |          0 |          2 |         10 |
+| src\types                                                                                             |          3 |        162 |          0 |         20 |        182 |
+| themes                                                                                                |          1 |          2 |          0 |          2 |          4 |
++-------------------------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+
+Files
++-------------------------------------------------------------------------------------------------------+--------------------+------------+------------+------------+------------+
+| filename                                                                                              | language           | code       | comment    | blank      | total      |
++-------------------------------------------------------------------------------------------------------+--------------------+------------+------------+------------+------------+
+| c:\Users\Ryan\Documents\SpEd Packet Studio\README.md                                                  | Markdown           |         42 |          0 |         15 |         57 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\__init__.py                                        | Python             |          0 |          1 |          1 |          2 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\__main__.py                                        | Python             |          6 |          0 |          3 |          9 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\api\__init__.py                                    | Python             |          0 |          1 |          1 |          2 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\api\router.py                                      | Python             |          6 |          0 |          1 |          7 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\api\routes\__init__.py                             | Python             |          0 |          1 |          1 |          2 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\api\routes\health.py                               | Python             |         11 |          0 |          2 |         13 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\api\routes\projects.py                             | Python             |        111 |          0 |         33 |        144 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\config.py                                          | Python             |         21 |          0 |          6 |         27 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\database\__init__.py                               | Python             |          0 |          1 |          1 |          2 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\database\base.py                                   | Python             |          5 |          0 |          1 |          6 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\database\initialize.py                             | Python             |          5 |          0 |          2 |          7 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\database\migrations\__init__.py                    | Python             |          0 |          1 |          1 |          2 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\database\migrations\runner.py                      | Python             |         22 |          0 |          2 |         24 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\database\migrations\versions\__init__.py           | Python             |          0 |          1 |          1 |          2 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\database\migrations\versions\v0001_initial.py      | Python             |          5 |          0 |          2 |          7 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\database\migrations\versions\v0002_sprint_one.py   | Python             |         22 |          0 |          7 |         29 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\database\migrations\versions\v0003_goal_summary.py | Python             |          9 |          0 |          3 |         12 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\database\session.py                                | Python             |         14 |          0 |          1 |         15 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\generators\__init__.py                             | Python             |          0 |          1 |          1 |          2 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\generators\pdf.py                                  | Python             |         20 |          0 |          7 |         27 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\main.py                                            | Python             |         25 |          0 |          3 |         28 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\models\__init__.py                                 | Python             |          2 |          0 |          1 |          3 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\models\domain.py                                   | Python             |         86 |          0 |         15 |        101 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\models\mixins.py                                   | Python             |         12 |          0 |          2 |         14 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\requirements.txt                                   | pip requirements   |          4 |          0 |          1 |          5 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\schemas\__init__.py                                | Python             |          0 |          1 |          1 |          2 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\schemas\projects.py                                | Python             |        154 |          0 |         60 |        214 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\schemas\system.py                                  | Python             |         14 |          0 |          1 |         15 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\services\__init__.py                               | Python             |          0 |          1 |          1 |          2 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\services\autosave.py                               | Python             |         16 |          1 |          1 |         18 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\services\projects.py                               | Python             |      1,317 |        237 |        109 |      1,663 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\tests\__init__.py                                  | Python             |          0 |          1 |          1 |          2 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\backend\tests\test_projects.py                             | Python             |        187 |          0 |         14 |        201 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\index.html                                                 | HTML               |         13 |          0 |          1 |         14 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\package.json                                               | JSON               |         34 |          0 |          1 |         35 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\pnpm-lock.yaml                                             | YAML               |      1,256 |          0 |        340 |      1,596 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\pnpm-workspace.yaml                                        | YAML               |          4 |          0 |          1 |          5 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\scripts\dev.mjs                                            | JavaScript         |         33 |          0 |          3 |         36 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src-tauri\build.rs                                         | Rust               |          1 |          0 |          1 |          2 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src-tauri\capabilities\default.json                        | JSON               |          5 |          0 |          1 |          6 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src-tauri\gen\schemas\acl-manifests.json                   | JSON               |          1 |          0 |          0 |          1 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src-tauri\gen\schemas\capabilities.json                    | JSON               |          1 |          0 |          0 |          1 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src-tauri\gen\schemas\desktop-schema.json                  | JSON               |      2,292 |          0 |          0 |      2,292 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src-tauri\gen\schemas\windows-schema.json                  | JSON               |      2,292 |          0 |          0 |      2,292 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src-tauri\src\lib.rs                                       | Rust               |         36 |          0 |          6 |         42 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src-tauri\src\main.rs                                      | Rust               |          1 |          0 |          1 |          2 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src-tauri\tauri.conf.json                                  | JSON               |         10 |          0 |          1 |         11 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\App.tsx                                                | TypeScript JSX     |        200 |          0 |          8 |        208 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\components\system\StatusBadge.tsx                      | TypeScript JSX     |          4 |          0 |          1 |          5 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\components\system\SystemCard.tsx                       | TypeScript JSX     |          3 |          0 |          1 |          4 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\components\ui\Button.tsx                               | TypeScript JSX     |         32 |          0 |          5 |         37 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\components\ui\Card.tsx                                 | TypeScript JSX     |         37 |          0 |          3 |         40 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\components\ui\FormField.tsx                            | TypeScript JSX     |         44 |          0 |          7 |         51 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\components\workflow\SaveStatus.tsx                     | TypeScript JSX     |         22 |          0 |          3 |         25 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\components\workflow\ValidationSummary.tsx              | TypeScript JSX     |         26 |          0 |          2 |         28 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\components\workflow\WorkflowHeader.tsx                 | TypeScript JSX     |         36 |          0 |          2 |         38 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\hooks\useAutosave.ts                                   | TypeScript         |         18 |          0 |          1 |         19 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\hooks\useSystemHealth.ts                               | TypeScript         |         15 |          0 |          1 |         16 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\layouts\AppShell.tsx                                   | TypeScript JSX     |         36 |          0 |          3 |         39 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\lib\validation.ts                                      | TypeScript         |        106 |          0 |          5 |        111 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\main.tsx                                               | TypeScript JSX     |          8 |          0 |          2 |         10 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\navigation\navigation.ts                               | TypeScript         |         10 |          0 |          1 |         11 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\pages\AtAGlancePage.tsx                                | TypeScript JSX     |        169 |          0 |         15 |        184 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\pages\DashboardPage.tsx                                | TypeScript JSX     |        210 |          0 |         14 |        224 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\pages\DataSheetBuilderPage.tsx                         | TypeScript JSX     |        501 |          0 |         26 |        527 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\pages\FoundationPage.tsx                               | TypeScript JSX     |         16 |          0 |          1 |         17 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\pages\GoalBuilderPage.tsx                              | TypeScript JSX     |        272 |          0 |         17 |        289 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\pages\PacketDesignerPage.tsx                           | TypeScript JSX     |        279 |          0 |         19 |        298 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\pages\ReviewExportPage.tsx                             | TypeScript JSX     |        279 |          0 |         19 |        298 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\pages\StudentSetupPage.tsx                             | TypeScript JSX     |        363 |          0 |         26 |        389 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\services\api\client.ts                                 | TypeScript         |         47 |          0 |          5 |         52 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\services\api\projects.ts                               | TypeScript         |        122 |          0 |         16 |        138 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\services\api\system.ts                                 | TypeScript         |          3 |          0 |          1 |          4 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\styles.css                                             | PostCSS            |         16 |          0 |          2 |         18 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\themes\ThemeProvider.tsx                               | TypeScript JSX     |          6 |          0 |          1 |          7 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\themes\theme.ts                                        | TypeScript         |          2 |          0 |          1 |          3 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\types\navigation.ts                                    | TypeScript         |         15 |          0 |          2 |         17 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\types\projects.ts                                      | TypeScript         |        141 |          0 |         17 |        158 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\types\system.ts                                        | TypeScript         |          6 |          0 |          1 |          7 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\src\vite-env.d.ts                                          | TypeScript         |          0 |          1 |          1 |          2 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\themes\README.md                                           | Markdown           |          2 |          0 |          2 |          4 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\tsconfig.app.json                                          | JSON               |         13 |          0 |          1 |         14 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\tsconfig.json                                              | JSON with Comments |          1 |          0 |          1 |          2 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\tsconfig.node.json                                         | JSON               |         10 |          0 |          1 |         11 |
+| c:\Users\Ryan\Documents\SpEd Packet Studio\vite.config.ts                                             | TypeScript         |         14 |          0 |          2 |         16 |
+| Total                                                                                                 |                    |     11,179 |        249 |        894 |     12,322 |
++-------------------------------------------------------------------------------------------------------+--------------------+------------+------------+------------+------------+

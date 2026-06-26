@@ -23,6 +23,9 @@ const audienceOptions: readonly { value: Audience; label: string }[] = [
   { value: "substitute", label: "Substitute" },
 ];
 
+const settingOptions = ["Regular Education", "Special Education"] as const;
+const customSettingValue = "__custom_setting__";
+
 function deriveInitials(name: string) {
   return name
     .split(/\s+/)
@@ -50,18 +53,40 @@ function blankServiceArea(position: number): ServiceAreaDraft {
   };
 }
 
+function settingSelectValue(setting: string) {
+  if (!setting) return "";
+  return settingOptions.includes(setting as (typeof settingOptions)[number])
+    ? setting
+    : customSettingValue;
+}
+
+function serviceAreaKey(_area: ServiceAreaDraft, index: number) {
+  return `service-area-${index}`;
+}
+
 function initialDraft(project: ProjectDetail): StudentSetupDraft {
+  const student = project.student
+    ? {
+        name: project.student.name,
+        initials: project.student.initials,
+        grade: project.student.grade,
+        school: project.student.school,
+        case_manager: project.student.case_manager,
+        iep_end_date: project.student.iep_end_date,
+      }
+    : {
+        name: "",
+        initials: "",
+        grade: "",
+        school: "",
+        case_manager: "",
+        iep_end_date: null,
+      };
+
   return {
     project_name: project.name === "Untitled Student Project" ? "" : project.name,
     school_year: project.school_year,
-    student: project.student ?? {
-      name: "",
-      initials: "",
-      grade: "",
-      school: "",
-      case_manager: "",
-      iep_end_date: null,
-    },
+    student,
     service_areas: project.service_areas.map((area) => ({ ...area })),
     audiences: [...project.audiences],
   };
@@ -82,6 +107,15 @@ export function StudentSetupPage({
 }: StudentSetupPageProps) {
   const [draft, setDraft] = useState<StudentSetupDraft>(() => initialDraft(project));
   const [saveError, setSaveError] = useState("");
+  const [customSettingRows, setCustomSettingRows] = useState<ReadonlySet<string>>(
+    () =>
+      new Set(
+        project.service_areas
+          .map((area, index) => ({ key: serviceAreaKey(area, index), setting: area.setting }))
+          .filter(({ setting }) => settingSelectValue(setting) === customSettingValue)
+          .map(({ key }) => key),
+      ),
+  );
   const validation = useMemo(() => validateStudentSetup(draft), [draft]);
 
   const autosave = useAutosave({
@@ -184,7 +218,7 @@ export function StudentSetupPage({
   return (
     <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
       <WorkflowHeader
-        eyebrow="Step 1 of 3"
+        eyebrow="Step 1 of 6"
         title="Student Setup"
         description="Create the student profile, service areas, and initial packet audiences that every later step will reference."
         status={autosave.status}
@@ -271,7 +305,39 @@ export function StudentSetupPage({
                       <TextInput id={`area-${index}-name`} value={area.name} onChange={(event) => updateArea(index, { name: event.target.value })} placeholder="Reading, mathematics..." />
                     </FieldFrame>
                     <FieldFrame label="Setting" htmlFor={`area-${index}-setting`}>
-                      <TextInput id={`area-${index}-setting`} value={area.setting} onChange={(event) => updateArea(index, { setting: event.target.value })} placeholder="Resource room, classroom..." />
+                      <select
+                        className={selectClass}
+                        id={`area-${index}-setting`}
+                        value={customSettingRows.has(serviceAreaKey(area, index)) ? customSettingValue : settingSelectValue(area.setting)}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          const rowKey = serviceAreaKey(area, index);
+                          setCustomSettingRows((current) => {
+                            const next = new Set(current);
+                            if (value === customSettingValue) {
+                              next.add(rowKey);
+                            } else {
+                              next.delete(rowKey);
+                            }
+                            return next;
+                          });
+                          updateArea(index, { setting: value === customSettingValue ? "" : value });
+                        }}
+                      >
+                        <option value="">Select setting</option>
+                        <option value="Regular Education">Regular Education</option>
+                        <option value="Special Education">Special Education</option>
+                        <option value={customSettingValue}>Other</option>
+                      </select>
+                      {(settingSelectValue(area.setting) === customSettingValue || customSettingRows.has(serviceAreaKey(area, index))) && (
+                        <TextInput
+                          className="mt-2"
+                          value={area.setting}
+                          onChange={(event) => updateArea(index, { setting: event.target.value })}
+                          placeholder="Type custom setting"
+                          aria-label={`Custom setting for service area ${index + 1}`}
+                        />
+                      )}
                     </FieldFrame>
                     <FieldFrame label="Minutes per week" htmlFor={`area-${index}-minutes`}>
                       <TextInput id={`area-${index}-minutes`} type="number" min={0} value={area.minutes_per_week ?? ""} onChange={(event) => updateArea(index, { minutes_per_week: event.target.value ? Number(event.target.value) : null })} />

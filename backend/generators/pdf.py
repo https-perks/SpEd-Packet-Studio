@@ -1,9 +1,26 @@
 from dataclasses import dataclass
+
+
 @dataclass(frozen=True, slots=True)
 class PdfRenderRequest:
     html: str
     base_url: str | None = None
-def render_pdf(_: PdfRenderRequest) -> bytes:
-    """Reserve the WeasyPrint boundary without implementing packet generation."""
-    # TODO(Sprint 3/4): Render deterministic packet HTML using WeasyPrint.
-    raise NotImplementedError("PDF packet generation is outside Sprint 0.")
+
+
+def render_pdf(request: PdfRenderRequest) -> bytes:
+    try:
+        from weasyprint import HTML
+    except OSError as reason:
+        raise RuntimeError(
+            "WeasyPrint is installed, but its native rendering libraries are unavailable. "
+            "Install the WeasyPrint Windows GTK/Pango dependencies, then retry export."
+        ) from reason
+    return HTML(string=request.html, base_url=request.base_url).write_pdf()
+
+
+def renderer_available() -> bool:
+    try:
+        from weasyprint import HTML  # noqa: F401
+    except OSError:
+        return False
+    return True

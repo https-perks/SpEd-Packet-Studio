@@ -15,7 +15,8 @@ const stepLabels = {
   student_setup: "Student Setup",
   goals: "Goal Builder",
   at_a_glance: "At-a-Glance",
-  complete: "Sprint 1 complete",
+  data_sheets: "Data Sheets",
+  complete: "Sprint 4 complete",
 } as const;
 
 interface DashboardPageProps {
@@ -208,7 +209,7 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
       <div className="mt-8 grid gap-4 md:grid-cols-2">
         <Card title="Templates" description="Reusable project templates are planned for a later Version 1 sprint.">
           <p className="text-sm text-[var(--theme-text-muted)]">
-            Sprint 1 projects begin with a clean, structured student record.
+            Sprint 4 projects include deterministic packet review and local PDF export.
           </p>
         </Card>
         <Card title="Application settings" description="The local-first foundation is active.">

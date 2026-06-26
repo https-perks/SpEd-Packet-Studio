@@ -13,6 +13,7 @@ function blankGoal(serviceAreaId: string | null, position: number): GoalDraft {
   return {
     title: "",
     statement: "",
+    data_sheet_summary: "",
     service_area_id: serviceAreaId,
     mastery_criteria: "",
     progress_monitoring_method: "",
@@ -141,7 +142,7 @@ export function GoalBuilderPage({
   return (
     <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
       <WorkflowHeader
-        eyebrow="Step 2 of 3"
+        eyebrow="Step 2 of 6"
         title="Goal Builder"
         description="Enter each annual goal once, assign it to one service area, and preserve the exact educational language."
         status={autosave.status}
@@ -229,6 +230,24 @@ export function GoalBuilderPage({
               <div className="md:col-span-2">
                 <FieldFrame label="Goal statement" htmlFor="goal-statement" required hint="Enter the goal exactly as it appears in the IEP.">
                   <TextArea id="goal-statement" className="min-h-40" value={selectedGoal.statement} onChange={(event) => updateSelected({ statement: event.target.value })} />
+                </FieldFrame>
+              </div>
+              <div className="md:col-span-2">
+                <FieldFrame
+                  label="Data-sheet summary"
+                  htmlFor="data-sheet-summary"
+                  required
+                  hint='Condense the measurable target for quick use on progress-monitoring forms. Example: "3 consecutive passages at 80 WPM with 90% accuracy."'
+                >
+                  <TextArea
+                    id="data-sheet-summary"
+                    className="min-h-24"
+                    value={selectedGoal.data_sheet_summary}
+                    onChange={(event) =>
+                      updateSelected({ data_sheet_summary: event.target.value })
+                    }
+                    placeholder="Brief measurable target"
+                  />
                 </FieldFrame>
               </div>
               <FieldFrame label="Mastery criteria" htmlFor="mastery" required>
