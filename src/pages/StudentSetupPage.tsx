@@ -218,7 +218,7 @@ export function StudentSetupPage({
   return (
     <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
       <WorkflowHeader
-        eyebrow="Step 1 of 6"
+        eyebrow="Step 1 of 7"
         title="Student Setup"
         description="Create the student profile, service areas, and initial packet audiences that every later step will reference."
         status={autosave.status}

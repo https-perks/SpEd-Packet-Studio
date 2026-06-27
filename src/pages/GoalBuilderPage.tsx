@@ -142,7 +142,7 @@ export function GoalBuilderPage({
   return (
     <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
       <WorkflowHeader
-        eyebrow="Step 2 of 6"
+        eyebrow="Step 3 of 7"
         title="Goal Builder"
         description="Enter each annual goal once, assign it to one service area, and preserve the exact educational language."
         status={autosave.status}

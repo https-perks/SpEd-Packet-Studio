@@ -4,6 +4,7 @@ import { AtAGlancePage } from "./pages/AtAGlancePage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DataSheetBuilderPage } from "./pages/DataSheetBuilderPage";
 import { GoalBuilderPage } from "./pages/GoalBuilderPage";
+import { ObservationSheetsPage } from "./pages/ObservationSheetsPage";
 import { PacketDesignerPage } from "./pages/PacketDesignerPage";
 import { ReviewExportPage } from "./pages/ReviewExportPage";
 import { StudentSetupPage } from "./pages/StudentSetupPage";
@@ -45,17 +46,19 @@ export function App() {
         return;
       }
       if (!project) return;
-      if (target === "goals" && !project.student_setup_validation.is_complete) {
-        setScreen("student_setup");
-        return;
-      }
       if (target === "at_a_glance") {
         if (!project.student_setup_validation.is_complete) {
           setScreen("student_setup");
           return;
         }
-        if (!project.goals_validation.is_complete) {
-          setScreen("goals");
+      }
+      if (target === "goals") {
+        if (!project.student_setup_validation.is_complete) {
+          setScreen("student_setup");
+          return;
+        }
+        if (!project.at_a_glance_validation.is_complete) {
+          setScreen("at_a_glance");
           return;
         }
       }
@@ -64,26 +67,26 @@ export function App() {
           setScreen("student_setup");
           return;
         }
-        if (!project.goals_validation.is_complete) {
-          setScreen("goals");
-          return;
-        }
         if (!project.at_a_glance_validation.is_complete) {
           setScreen("at_a_glance");
           return;
         }
+        if (!project.goals_validation.is_complete) {
+          setScreen("goals");
+          return;
+        }
       }
-      if (target === "packet_designer") {
+      if (target === "observation_sheets" || target === "packet_designer") {
         if (!project.student_setup_validation.is_complete) {
           setScreen("student_setup");
           return;
         }
-        if (!project.goals_validation.is_complete) {
-          setScreen("goals");
-          return;
-        }
         if (!project.at_a_glance_validation.is_complete) {
           setScreen("at_a_glance");
+          return;
+        }
+        if (!project.goals_validation.is_complete) {
+          setScreen("goals");
           return;
         }
         if (!project.data_sheets_validation.is_complete) {
@@ -96,12 +99,12 @@ export function App() {
           setScreen("student_setup");
           return;
         }
-        if (!project.goals_validation.is_complete) {
-          setScreen("goals");
-          return;
-        }
         if (!project.at_a_glance_validation.is_complete) {
           setScreen("at_a_glance");
+          return;
+        }
+        if (!project.goals_validation.is_complete) {
+          setScreen("goals");
           return;
         }
         if (!project.data_sheets_validation.is_complete) {
@@ -145,16 +148,6 @@ export function App() {
         project={project}
         onProjectUpdate={setProject}
         onBack={() => setScreen("dashboard")}
-        onContinue={() => setScreen("goals")}
-      />
-    );
-  } else if (screen === "goals") {
-    content = (
-      <GoalBuilderPage
-        key={`${project.id}-goals`}
-        project={project}
-        onProjectUpdate={setProject}
-        onBack={() => setScreen("student_setup")}
         onContinue={() => setScreen("at_a_glance")}
       />
     );
@@ -164,8 +157,18 @@ export function App() {
         key={`${project.id}-glance`}
         project={project}
         onProjectUpdate={setProject}
-        onBack={() => setScreen("goals")}
-        onComplete={() => setScreen("data_sheets")}
+        onBack={() => setScreen("student_setup")}
+        onComplete={() => setScreen("goals")}
+      />
+    );
+  } else if (screen === "goals") {
+    content = (
+      <GoalBuilderPage
+        key={`${project.id}-goals`}
+        project={project}
+        onProjectUpdate={setProject}
+        onBack={() => setScreen("at_a_glance")}
+        onContinue={() => setScreen("data_sheets")}
       />
     );
   } else if (screen === "data_sheets") {
@@ -175,6 +178,16 @@ export function App() {
         project={project}
         onProjectUpdate={setProject}
         onBack={() => setScreen("at_a_glance")}
+        onComplete={() => setScreen("observation_sheets")}
+      />
+    );
+  } else if (screen === "observation_sheets") {
+    content = (
+      <ObservationSheetsPage
+        key={`${project.id}-observation-sheets`}
+        project={project}
+        onProjectUpdate={setProject}
+        onBack={() => setScreen("data_sheets")}
         onComplete={() => setScreen("packet_designer")}
       />
     );
@@ -183,7 +196,8 @@ export function App() {
       <PacketDesignerPage
         key={`${project.id}-packet-designer`}
         project={project}
-        onBack={() => setScreen("data_sheets")}
+        onProjectUpdate={setProject}
+        onBack={() => setScreen("observation_sheets")}
         onComplete={() => setScreen("review")}
       />
     );

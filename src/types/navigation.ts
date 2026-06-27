@@ -4,6 +4,7 @@ export type AppScreen =
   | "goals"
   | "at_a_glance"
   | "data_sheets"
+  | "observation_sheets"
   | "packet_designer"
   | "review";
 

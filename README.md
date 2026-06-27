@@ -6,29 +6,52 @@ A local-first desktop publishing application for special education service packe
 
 Tauri desktop shell -> React and TypeScript presentation -> local FastAPI business layer -> SQLAlchemy ORM -> SQLite persistence -> WeasyPrint export engine.
 
-## Current scope
+## Version 1.0 scope
 
-Sprint 4 includes:
+Version 1.0 is feature-complete for producing local special education service
+packets without external software.
+
+The guided workflow is:
+
+1. Student Setup
+2. At-a-Glance Builder
+3. Goal Builder
+4. Data Sheet Builder
+5. Observation Sheets
+6. Packet Designer
+7. Review & Export
+
+Included:
 
 - Project Dashboard with create, open, search, duplicate, archive, and restore
-- Student Setup with service areas and initial packet audiences
-- Goal Builder
-- At-a-Glance Builder with live preview
-- Data Sheet Builder with reusable progress-monitoring sheet definitions,
-  editable table columns, and blank table instance counts
-- Packet Designer with a deterministic packet outline and repeated blank data
-  table previews
-- Review & Export with deterministic local PDF generation through FastAPI and
-  WeasyPrint
-- Continuous autosave and progressive validation
+- Student profile, service areas, service minutes, delivery model, and setting
+  management
+- At-a-Glance editable sections with visibility, ordering, live preview,
+  autosave, and validation
+- Goal creation, editing, deletion, duplication, service-area assignment,
+  ordering, autosave, and validation
+- Data Sheet Builder with reusable templates, goal linking, editable table
+  columns, blank table instance counts, autosave, and validation
+- Observation Sheets as a separate workflow from goal data collection, including
+  custom observation tables and customizable "Things Staff Need To Tell..."
+  checklist items
+- Packet Designer with per-version page visibility, page ordering, live preview,
+  autosave, and theme application
+- Review & Export with full validation, selected-version export, export-all
+  packet versions, deterministic PDF export, and local JSON backup support
+- Local SQLite project storage and local PDF export storage
 
 Each goal stores both its complete IEP statement and a concise data-sheet summary.
 The summary is owned by the Goal object and is referenced by the Data Sheet
 Builder without duplicating goal language.
 
 Generated PDFs are stored locally under the application data exports folder.
-Accommodations and modifications are intentionally separate from At-a-Glance and
-are reserved for a future dedicated page/editor.
+Project backups are stored locally as JSON.
+
+Accommodations/modifications, behavior-plan editing, uploaded visual assets, and
+Canva-style granular page editing are intentionally post-1.0 editor features.
+The current Packet Designer stores page visibility/order and applies the selected
+theme, but does not yet provide freeform layout editing.
 
 ## Development
 
@@ -49,8 +72,11 @@ Frontend-only: `pnpm dev`. Backend-only: `python -m backend`.
 
 ```text
 pnpm build
-pnpm backend:check
-pnpm backend:test
-python -m backend.database.initialize
+.venv\Scripts\python.exe -m unittest discover -s backend\tests -v
+.venv\Scripts\python.exe -m compileall backend
 cargo check --manifest-path src-tauri\Cargo.toml
 ```
+
+WeasyPrint may emit GLib-GIO warnings on Windows when it inspects registered UWP
+file handlers. These warnings do not block PDF generation when the PDF file is
+created successfully.

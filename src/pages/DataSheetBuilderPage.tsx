@@ -48,14 +48,18 @@ function newColumn(position: number): DataSheetColumnDraft {
 }
 
 function blankDataSheet(project: ProjectDetail, position: number): DataSheetDraft {
+  const firstTemplate = project.data_sheets.find((sheet) => sheet.is_template && !sheet.is_observation_form);
   return {
     title: "",
-    sheet_type: "trial_count",
+    sheet_type: firstTemplate?.sheet_type ?? "trial_count",
     goal_ids: project.goals[0]?.id ? [project.goals[0].id] : [],
-    collection_schedule: "",
+    collection_schedule: firstTemplate?.collection_schedule ?? "",
     blank_instance_count: 1,
-    columns: defaultColumns.map((column) => ({ ...column })),
-    notes: "",
+    columns: firstTemplate?.columns.map((column) => ({ ...column })) ?? defaultColumns.map((column) => ({ ...column })),
+    notes: firstTemplate?.notes ?? "",
+    template_name: "",
+    is_template: false,
+    is_observation_form: false,
     position,
   };
 }
@@ -74,16 +78,28 @@ export function DataSheetBuilderPage({
   onComplete,
 }: DataSheetBuilderPageProps) {
   const [dataSheets, setDataSheets] = useState<DataSheetDraft[]>(() =>
-    project.data_sheets.map((sheet) => ({
+    project.data_sheets.filter((sheet) => !sheet.is_observation_form).map((sheet) => ({
       ...sheet,
       goal_ids: [...sheet.goal_ids],
       columns: sheet.columns.map((column) => ({ ...column })),
+      template_name: sheet.template_name ?? "",
+      is_template: sheet.is_template ?? false,
+      is_observation_form: sheet.is_observation_form ?? false,
     })),
+  );
+  const observationSheets = useMemo(
+    () => project.data_sheets.filter((sheet) => sheet.is_observation_form).map((sheet) => ({
+      ...sheet,
+      goal_ids: [],
+      columns: sheet.columns.map((column) => ({ ...column })),
+    })),
+    [project.data_sheets],
   );
   const [selectedIndex, setSelectedIndex] = useState(project.data_sheets.length ? 0 : -1);
   const [saveError, setSaveError] = useState("");
   const validation = useMemo(() => validateDataSheets(dataSheets), [dataSheets]);
   const selectedSheet = selectedIndex >= 0 ? dataSheets[selectedIndex] : undefined;
+  const templates = project.data_sheets.filter((sheet) => sheet.is_template && !sheet.is_observation_form);
   const goalsById = useMemo(
     () => new Map(project.goals.map((goal) => [goal.id, goal])),
     [project.goals],
@@ -97,7 +113,7 @@ export function DataSheetBuilderPage({
     delayMs: 850,
     save: async (value, signal) => {
       try {
-        const saved = await saveDataSheets(project.id, value, signal);
+        const saved = await saveDataSheets(project.id, [...value, ...observationSheets], signal);
         setSaveError("");
         onProjectUpdate(saved);
         setDataSheets((current) => {
@@ -131,6 +147,18 @@ export function DataSheetBuilderPage({
         index === selectedIndex ? { ...sheet, ...patch } : sheet,
       ),
     );
+  }
+
+  function applyTemplate(templateId: string) {
+    const template = templates.find((sheet) => sheet.id === templateId);
+    if (!template || !selectedSheet) return;
+    updateSelected({
+      sheet_type: template.sheet_type,
+      collection_schedule: template.collection_schedule,
+      blank_instance_count: template.blank_instance_count,
+      columns: template.columns.map((column) => ({ ...column, id: `column-${crypto.randomUUID()}` })),
+      notes: template.notes,
+    });
   }
 
   function toggleGoal(goalId: string) {
@@ -183,6 +211,9 @@ export function DataSheetBuilderPage({
       title: selectedSheet.title ? `${selectedSheet.title} (Copy)` : "",
       goal_ids: [...selectedSheet.goal_ids],
       columns: selectedSheet.columns.map((column) => ({ ...column })),
+      template_name: selectedSheet.template_name,
+      is_template: selectedSheet.is_template,
+      is_observation_form: selectedSheet.is_observation_form,
       position: dataSheets.length,
     };
     setDataSheets((current) => [...current, copy]);
@@ -222,7 +253,7 @@ export function DataSheetBuilderPage({
   return (
     <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
       <WorkflowHeader
-        eyebrow="Step 4 of 6"
+        eyebrow="Step 4 of 7"
         title="Data Sheet Builder"
         description="Create progress-monitoring sheet definitions from existing goals. Goal text stays owned by the Goal Builder."
         status={autosave.status}
@@ -309,6 +340,29 @@ export function DataSheetBuilderPage({
                   >
                     {sheetTypes.map((type) => (
                       <option key={type.value} value={type.value}>{type.label}</option>
+                    ))}
+                  </select>
+                </FieldFrame>
+                <FieldFrame label="Reusable template name" htmlFor="template-name" hint="Optional label for reusing this table structure later.">
+                  <TextInput
+                    id="template-name"
+                    value={selectedSheet.template_name}
+                    onChange={(event) =>
+                      updateSelected({
+                        template_name: event.target.value,
+                        is_template: Boolean(event.target.value.trim()),
+                      })
+                    }
+                    placeholder="Weekly fluency table"
+                  />
+                </FieldFrame>
+                <FieldFrame label="Apply template" htmlFor="apply-template" hint="Copies reusable table settings into this sheet.">
+                  <select id="apply-template" className={selectClass} defaultValue="" onChange={(event) => applyTemplate(event.target.value)}>
+                    <option value="">Choose template</option>
+                    {templates.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {template.template_name || template.title}
+                      </option>
                     ))}
                   </select>
                 </FieldFrame>

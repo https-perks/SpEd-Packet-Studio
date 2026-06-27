@@ -1,8 +1,11 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { FieldFrame, selectClass } from "../components/ui/FormField";
 import { WorkflowHeader } from "../components/workflow/WorkflowHeader";
-import type { DataSheetDraft, GoalDraft, ProjectDetail, ServiceAreaDraft } from "../types/projects";
+import { useAutosave } from "../hooks/useAutosave";
+import { savePacketBuilder } from "../services/api/projects";
+import type { DataSheetDraft, GoalDraft, PacketVersionConfig, ProjectDetail, ServiceAreaDraft } from "../types/projects";
 
 type GoalWithId = GoalDraft & { readonly id: string };
 type ServiceAreaWithId = ServiceAreaDraft & { readonly id: string };
@@ -54,15 +57,91 @@ function PacketPage({
 
 interface PacketDesignerPageProps {
   readonly project: ProjectDetail;
+  readonly onProjectUpdate: (project: ProjectDetail) => void;
   readonly onBack: () => void;
   readonly onComplete: () => void;
 }
 
 export function PacketDesignerPage({
   project,
+  onProjectUpdate,
   onBack,
   onComplete,
 }: PacketDesignerPageProps) {
+  const [configs, setConfigs] = useState<PacketVersionConfig[]>(() =>
+    project.packet_builder.map((config) => ({
+      packet_version_id: config.packet_version_id,
+      pages: config.pages.map((page) => ({ ...page })),
+      asset_placements: config.asset_placements.map((asset) => ({ ...asset })),
+    })),
+  );
+  const [selectedVersionId, setSelectedVersionId] = useState(
+    project.packet_versions[0]?.id ?? configs[0]?.packet_version_id ?? "",
+  );
+  const [draggedPageIndex, setDraggedPageIndex] = useState<number | null>(null);
+  const [saveError, setSaveError] = useState("");
+  const selectedConfig = configs.find((config) => config.packet_version_id === selectedVersionId) ?? configs[0];
+  const autosave = useAutosave({
+    value: configs,
+    delayMs: 850,
+    save: async (value, signal) => {
+      try {
+        const saved = await savePacketBuilder(project.id, value, signal);
+        setSaveError("");
+        onProjectUpdate(saved);
+      } catch (reason) {
+        if (signal.aborted) return;
+        setSaveError(reason instanceof Error ? reason.message : "Packet builder could not be saved.");
+        throw reason;
+      }
+    },
+  });
+
+  useEffect(() => {
+    if (draggedPageIndex === null) return;
+    const stopDragging = () => setDraggedPageIndex(null);
+    window.addEventListener("pointerup", stopDragging);
+    window.addEventListener("pointercancel", stopDragging);
+    return () => {
+      window.removeEventListener("pointerup", stopDragging);
+      window.removeEventListener("pointercancel", stopDragging);
+    };
+  }, [draggedPageIndex]);
+
+  function updateSelectedConfig(patch: Partial<PacketVersionConfig>) {
+    if (!selectedConfig) return;
+    setConfigs((current) =>
+      current.map((config) =>
+        config.packet_version_id === selectedConfig.packet_version_id
+          ? { ...config, ...patch }
+          : config,
+      ),
+    );
+  }
+
+  function updatePage(pageIndex: number, enabled: boolean) {
+    if (!selectedConfig) return;
+    updateSelectedConfig({
+      pages: selectedConfig.pages.map((page, index) =>
+        index === pageIndex ? { ...page, enabled } : page,
+      ),
+    });
+  }
+
+  function movePage(from: number, to: number) {
+    if (!selectedConfig || from === to || to < 0 || to >= selectedConfig.pages.length) return;
+    const pages = [...selectedConfig.pages];
+    const [page] = pages.splice(from, 1);
+    pages.splice(to, 0, page);
+    updateSelectedConfig({ pages: pages.map((item, position) => ({ ...item, position })) });
+  }
+
+  function moveDraggedPage(targetIndex: number) {
+    if (draggedPageIndex === null || draggedPageIndex === targetIndex) return;
+    movePage(draggedPageIndex, targetIndex);
+    setDraggedPageIndex(targetIndex);
+  }
+
   const studentName = project.student?.name || "Student";
   const serviceNames = uniqueServiceNames(project.service_areas);
   const goalsByServiceArea = project.service_areas.map((area) => ({
@@ -71,6 +150,7 @@ export function PacketDesignerPage({
   }));
   const unassignedGoals = project.goals.filter((goal) => !goal.service_area_id);
   const dataCollectionPages = project.data_sheets.flatMap((sheet) =>
+    sheet.is_observation_form ? [] :
     goalsForSheet(sheet, project.goals).flatMap((goal) =>
       Array.from({ length: sheet.blank_instance_count }).map((_, index) => ({
         sheet,
@@ -79,48 +159,94 @@ export function PacketDesignerPage({
       })),
     ),
   );
-  const outlinePages = [
-    { title: "Cover Page", description: "Student and packet overview" },
-    { title: "At-a-Glance", description: "Instructional summary" },
-    { title: "Accommodations/Modifications", description: "Placeholder for future editor" },
-    { title: "Behavior Plans", description: "Placeholder for future editor" },
-    { title: "Goal Summary", description: "Full goals grouped by service area" },
-    { title: "Service Areas", description: "Services, minutes, and delivery models" },
-    ...dataCollectionPages.map(({ sheet, goal, instance }) => ({
-      title: `Data Collection - ${goal.title}`,
-      description: `${sheet.title}, blank table ${instance} of ${sheet.blank_instance_count}`,
-    })),
-  ];
-
+  const enabledPageIds = new Set(selectedConfig?.pages.filter((page) => page.enabled).map((page) => page.id) ?? []);
   return (
     <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
       <WorkflowHeader
-        eyebrow="Step 5 of 6"
+        eyebrow="Step 6 of 7"
         title="Packet Designer"
-        description="Review the base packet structure generated from the data already entered. Sprint 4 will handle PDF review and export."
+        description="Choose which pages belong in each packet version, order them, and reserve asset placement slots."
+        status={autosave.status}
       />
 
+      {saveError && (
+        <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+          {saveError}
+        </div>
+      )}
+
       <div className="grid items-start gap-5 xl:grid-cols-[23rem_1fr]">
-        <Card title="Packet outline" description="Pages are generated deterministically from owned project objects.">
-          <ol className="space-y-3 text-sm">
-            {outlinePages.map((page, index) => (
-              <li
-                key={`${page.title}-${index}`}
-                className="rounded-xl border border-[var(--theme-border)] bg-white p-3"
+        <Card title="Packet controls" description="Visibility and order autosave per packet version.">
+          <FieldFrame label="Packet version" htmlFor="packet-version">
+            <select
+              id="packet-version"
+              className={selectClass}
+              value={selectedVersionId}
+              onChange={(event) => setSelectedVersionId(event.target.value)}
+            >
+              {project.packet_versions.map((version) => (
+                <option key={version.id} value={version.id}>{version.name}</option>
+              ))}
+            </select>
+          </FieldFrame>
+          <div className="mt-5 space-y-3 text-sm">
+            {selectedConfig?.pages.map((page, index) => (
+              <div
+                key={page.id}
+                onPointerEnter={() => moveDraggedPage(index)}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const source = Number(event.dataTransfer.getData("text/plain"));
+                  const from = Number.isNaN(source) ? draggedPageIndex : source;
+                  if (from !== null) movePage(from, index);
+                  setDraggedPageIndex(null);
+                }}
+                className={`rounded-xl border bg-white p-3 ${draggedPageIndex === index ? "border-[var(--theme-primary)] opacity-70" : "border-[var(--theme-border)]"}`}
               >
-                <span className="block font-semibold text-[var(--theme-text)]">
-                  {index + 1}. {page.title}
-                </span>
-                <span className="text-xs text-[var(--theme-text-muted)]">
-                  {page.description}
-                </span>
-              </li>
+                <div className="flex items-start gap-3">
+                  <button
+                    type="button"
+                    aria-label={`Drag ${page.title}`}
+                    title="Hold and drag to reorder"
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      setDraggedPageIndex(index);
+                    }}
+                    onPointerUp={() => setDraggedPageIndex(null)}
+                    className="mt-0.5 cursor-grab select-none rounded-lg border border-[var(--theme-border)] px-2 py-1 text-xs font-semibold text-[var(--theme-text-muted)] active:cursor-grabbing"
+                  >
+                    Drag
+                  </button>
+                  <input
+                    className="mt-1"
+                    type="checkbox"
+                    checked={page.enabled}
+                    onChange={(event) => updatePage(index, event.target.checked)}
+                  />
+                  <span className="min-w-0">
+                    <span className="block font-semibold text-[var(--theme-text)]">
+                      {index + 1}. {page.title}
+                    </span>
+                    <span className="text-xs text-[var(--theme-text-muted)]">
+                      Hold Drag and move over another row, or use Up/Down
+                    </span>
+                  </span>
+                </div>
+                <div className="mt-2 flex gap-1">
+                  <Button variant="text" disabled={index === 0} onClick={() => movePage(index, index - 1)}>Up</Button>
+                  <Button variant="text" disabled={index === selectedConfig.pages.length - 1} onClick={() => movePage(index, index + 1)}>Down</Button>
+                </div>
+              </div>
             ))}
-          </ol>
+          </div>
         </Card>
 
         <div className="space-y-5">
-          <PacketPage title="Cover Page" description="Uses Student Setup data.">
+          {enabledPageIds.has("cover") && <PacketPage title="Cover Page" description="Uses Student Setup data.">
             <div className="border-b border-[var(--theme-border)] pb-6">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--theme-accent)]">
                 Special Education Service Packet
@@ -150,9 +276,9 @@ export function PacketDesignerPage({
                 </dd>
               </div>
             </dl>
-          </PacketPage>
+          </PacketPage>}
 
-          <PacketPage title="At-a-Glance" description="Instructional summary preview.">
+          {enabledPageIds.has("at_a_glance") && <PacketPage title="At-a-Glance" description="Instructional summary preview.">
             <div className="overflow-hidden rounded-xl border border-[var(--theme-border)]">
               <div className="bg-[var(--theme-primary)] px-5 py-5 text-white">
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/65">
@@ -176,21 +302,21 @@ export function PacketDesignerPage({
                   ))}
               </div>
             </div>
-          </PacketPage>
+          </PacketPage>}
 
-          <PacketPage title="Accommodations/Modifications" description="Reserved for future functionality.">
+          {enabledPageIds.has("accommodations") && <PacketPage title="Accommodations/Modifications" description="Reserved for future functionality.">
             <p className="text-sm leading-6 text-[var(--theme-text-muted)]">
               This page is part of the base packet structure. Content will be powered by the future accommodations/modifications editor.
             </p>
-          </PacketPage>
+          </PacketPage>}
 
-          <PacketPage title="Behavior Plans" description="Reserved for future functionality.">
+          {enabledPageIds.has("behavior") && <PacketPage title="Behavior Plans" description="Reserved for future functionality.">
             <p className="text-sm leading-6 text-[var(--theme-text-muted)]">
               This page is part of the base packet structure. Behavior plan content will be added alongside the future accommodations/modifications workflow.
             </p>
-          </PacketPage>
+          </PacketPage>}
 
-          <PacketPage title="Goal Summary" description="Full goals grouped under each service area.">
+          {enabledPageIds.has("goal_summary") && <PacketPage title="Goal Summary" description="Full goals grouped under each service area.">
             <div className="space-y-6">
               {[...goalsByServiceArea, ...(unassignedGoals.length ? [{ area: null, goals: unassignedGoals }] : [])]
                 .filter((group) => group.goals.length)
@@ -212,9 +338,9 @@ export function PacketDesignerPage({
                   </section>
                 ))}
             </div>
-          </PacketPage>
+          </PacketPage>}
 
-          <PacketPage title="Service Areas" description="Includes duplicate service names when delivery differs.">
+          {enabledPageIds.has("services") && <PacketPage title="Service Areas" description="Includes duplicate service names when delivery differs.">
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-sm">
                 <thead>
@@ -237,9 +363,9 @@ export function PacketDesignerPage({
                 </tbody>
               </table>
             </div>
-          </PacketPage>
+          </PacketPage>}
 
-          {dataCollectionPages.map(({ sheet, goal, instance }) => (
+          {enabledPageIds.has("data_collection") && dataCollectionPages.map(({ sheet, goal, instance }) => (
             <PacketPage
               key={`${sheet.id ?? sheet.title}-${goal.id}-${instance}`}
               title={`Data Collection - ${goal.title}`}
@@ -290,7 +416,10 @@ export function PacketDesignerPage({
 
       <footer className="mt-5 flex flex-wrap items-center justify-between gap-3 pb-6">
         <Button variant="outline" onClick={onBack}>Back</Button>
-        <Button onClick={onComplete}>Finish Sprint 3</Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => void autosave.saveImmediately()}>Save Draft</Button>
+          <Button onClick={() => void autosave.saveImmediately().then(onComplete)}>Continue to Review</Button>
+        </div>
       </footer>
     </div>
   );

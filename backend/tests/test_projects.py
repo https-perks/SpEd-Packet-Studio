@@ -15,6 +15,8 @@ from backend.schemas.projects import (
     AtAGlanceDraft,
     DataSheetsDraft,
     GoalsDraft,
+    ObservationChecklistDraft,
+    PacketBuilderDraft,
     StudentSetupDraft,
     ThemeSelection,
 )
@@ -153,21 +155,88 @@ class ProjectWorkflowTests(unittest.TestCase):
                 [column.title for column in detail.data_sheets[0].columns],
                 ["Date", "WPM", "Accuracy"],
             )
+            observation_sheets = DataSheetsDraft.model_validate(
+                {
+                    "data_sheets": [
+                        detail.data_sheets[0].model_dump(),
+                        {
+                            "title": "Classroom Observation",
+                            "sheet_type": "notes",
+                            "goal_ids": [],
+                            "collection_schedule": "As needed",
+                            "blank_instance_count": 1,
+                            "columns": [
+                                {
+                                    "id": "date",
+                                    "title": "Date",
+                                    "column_type": "date",
+                                    "position": 0,
+                                },
+                                {
+                                    "id": "observation",
+                                    "title": "Observation",
+                                    "column_type": "notes",
+                                    "position": 1,
+                                },
+                            ],
+                            "notes": "General classroom observation form.",
+                            "is_observation_form": True,
+                            "position": 1,
+                        },
+                    ]
+                }
+            )
+            detail = projects.save_data_sheets(session, created.id, observation_sheets)
+            self.assertTrue(detail.data_sheets_validation.is_complete)
+            self.assertEqual(
+                len([sheet for sheet in detail.data_sheets if sheet.is_observation_form]),
+                1,
+            )
+            detail = projects.save_observation_checklist(
+                session,
+                created.id,
+                ObservationChecklistDraft(
+                    items=["New concerns", "Major improvement"],
+                ),
+            )
+            self.assertEqual(detail.observation_checklist, ["New concerns", "Major improvement"])
             detail = projects.save_project_theme(
                 session,
                 created.id,
                 ThemeSelection(theme_id="teacher_friendly"),
             )
             self.assertEqual(detail.theme_id, "teacher_friendly")
+            detail = projects.save_packet_builder(
+                session,
+                created.id,
+                PacketBuilderDraft(packet_versions=detail.packet_builder),
+            )
+            self.assertGreater(len(detail.packet_builder), 0)
+            html = projects._build_packet_html(  # noqa: SLF001 - regression coverage for generated packet content
+                detail,
+                theme_id="teacher_friendly",
+                packet_version_name=detail.packet_versions[0].name,
+                packet_config=detail.packet_builder[0],
+            )
+            self.assertIn("Classroom Observation", html)
+            self.assertNotIn("Follow-up / Action", html)
+            self.assertIn("New concerns", html)
 
             duplicate = projects.duplicate_project(session, created.id)
             self.assertEqual(len(duplicate.goals), 1)
-            self.assertEqual(len(duplicate.data_sheets), 1)
+            self.assertEqual(len(duplicate.data_sheets), 2)
             self.assertEqual(
-                duplicate.data_sheets[0].goal_ids,
+                len([sheet for sheet in duplicate.data_sheets if sheet.is_observation_form]),
+                1,
+            )
+            self.assertEqual(
+                [sheet for sheet in duplicate.data_sheets if not sheet.is_observation_form][0].goal_ids,
                 [duplicate.goals[0].id],
             )
-            self.assertEqual(duplicate.data_sheets[0].blank_instance_count, 4)
+            self.assertEqual(
+                [sheet for sheet in duplicate.data_sheets if not sheet.is_observation_form][0].blank_instance_count,
+                4,
+            )
 
             if renderer_available():
                 export = projects.generate_pdf_export(session, created.id)
@@ -178,6 +247,8 @@ class ProjectWorkflowTests(unittest.TestCase):
                 self.assertTrue(
                     export.download_url.endswith(f"/exports/{export.id}/download")
                 )
+                all_exports = projects.generate_all_pdf_exports(session, created.id)
+                self.assertGreaterEqual(len(all_exports.exports), len(detail.packet_versions))
             else:
                 self.skipTest("WeasyPrint native rendering libraries are not installed.")
 

@@ -7,6 +7,7 @@ import { WorkflowHeader } from "../components/workflow/WorkflowHeader";
 import {
   createProjectBackup,
   exportDownloadUrl,
+  generateAllPdfExports,
   generatePdfExport,
   listThemes,
   saveProjectTheme,
@@ -49,6 +50,7 @@ export function ReviewExportPage({
   onComplete,
 }: ReviewExportPageProps) {
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
+  const [allExportResults, setAllExportResults] = useState<readonly ExportResult[]>([]);
   const [backupResult, setBackupResult] = useState<BackupResult | null>(null);
   const [themes, setThemes] = useState<ThemeOption[]>([]);
   const [selectedThemeId, setSelectedThemeId] = useState(project.theme_id || "teacher_friendly");
@@ -56,6 +58,7 @@ export function ReviewExportPage({
     project.packet_versions[0]?.id ?? "",
   );
   const [exporting, setExporting] = useState(false);
+  const [exportingAll, setExportingAll] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
@@ -81,6 +84,23 @@ export function ReviewExportPage({
       setError(reason instanceof Error ? reason.message : "The packet could not be exported.");
     } finally {
       setExporting(false);
+    }
+  }
+
+  async function handleExportAll() {
+    setExportingAll(true);
+    setError("");
+    try {
+      const result = await generateAllPdfExports(project.id, {
+        themeId: selectedThemeId,
+      });
+      setAllExportResults(result.exports);
+      setExportResult(result.exports[0] ?? null);
+      onComplete();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The packet versions could not be exported.");
+    } finally {
+      setExportingAll(false);
     }
   }
 
@@ -127,7 +147,7 @@ export function ReviewExportPage({
   return (
     <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
       <WorkflowHeader
-        eyebrow="Step 6 of 6"
+        eyebrow="Step 7 of 7"
         title="Review & Export"
         description="Confirm the packet is complete, then generate a deterministic PDF from the backend packet builder."
       />
@@ -240,6 +260,26 @@ export function ReviewExportPage({
             </Card>
           )}
 
+          {allExportResults.length > 1 && (
+            <Card title="All packet exports" description="Each selected packet version was exported separately.">
+              <div className="space-y-3">
+                {allExportResults.map((result) => (
+                  <div key={result.id} className="rounded-xl border border-[var(--theme-border)] bg-white p-3 text-sm">
+                    <p className="font-semibold text-[var(--theme-text)]">{result.filename}</p>
+                    <p className="mt-1 break-all text-xs text-[var(--theme-text-muted)]">{result.absolute_path}</p>
+                    <a
+                      className="mt-2 inline-flex text-sm font-semibold text-[var(--theme-primary)]"
+                      href={exportDownloadUrl(result)}
+                      download={result.filename}
+                    >
+                      Download
+                    </a>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
           {backupResult && (
             <Card title="Latest backup" description="This JSON backup was written locally.">
               <dl className="grid gap-3 text-sm md:grid-cols-2">
@@ -267,10 +307,18 @@ export function ReviewExportPage({
             </p>
             <Button
               className="mt-5 w-full justify-center"
-              disabled={!validation.is_complete || exporting}
+              disabled={!validation.is_complete || exporting || exportingAll}
               onClick={() => void handleExport()}
             >
               {exporting ? "Generating..." : "Generate PDF"}
+            </Button>
+            <Button
+              className="mt-2 w-full justify-center"
+              variant="outline"
+              disabled={!validation.is_complete || exporting || exportingAll}
+              onClick={() => void handleExportAll()}
+            >
+              {exportingAll ? "Generating all..." : "Export All Versions"}
             </Button>
           </Card>
           <Card title="Backup project" description="Create a local JSON backup of the project data." className="mt-5">

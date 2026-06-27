@@ -7,9 +7,12 @@ from backend.schemas.projects import (
     AtAGlanceDraft,
     BackupResponse,
     DataSheetsDraft,
+    ExportAllResponse,
     ExportRequest,
     ExportResponse,
     GoalsDraft,
+    ObservationChecklistDraft,
+    PacketBuilderDraft,
     ProjectCreate,
     ProjectDetail,
     ProjectSummary,
@@ -95,6 +98,24 @@ def save_project_theme(
     return projects.save_project_theme(session, project_id, value)
 
 
+@router.put("/{project_id}/observation-checklist", response_model=ProjectDetail)
+def save_observation_checklist(
+    project_id: str,
+    value: ObservationChecklistDraft,
+    session: Session = Depends(get_session),
+) -> ProjectDetail:
+    return projects.save_observation_checklist(session, project_id, value)
+
+
+@router.put("/{project_id}/packet-builder", response_model=ProjectDetail)
+def save_packet_builder(
+    project_id: str,
+    value: PacketBuilderDraft,
+    session: Session = Depends(get_session),
+) -> ProjectDetail:
+    return projects.save_packet_builder(session, project_id, value)
+
+
 @router.post("/{project_id}/exports/pdf", response_model=ExportResponse, status_code=201)
 def generate_pdf_export(
     project_id: str,
@@ -102,6 +123,15 @@ def generate_pdf_export(
     session: Session = Depends(get_session),
 ) -> ExportResponse:
     return projects.generate_pdf_export(session, project_id, value)
+
+
+@router.post("/{project_id}/exports/pdf/all", response_model=ExportAllResponse, status_code=201)
+def generate_all_pdf_exports(
+    project_id: str,
+    value: ExportRequest | None = None,
+    session: Session = Depends(get_session),
+) -> ExportAllResponse:
+    return projects.generate_all_pdf_exports(session, project_id, value)
 
 
 @router.post("/{project_id}/backup", response_model=BackupResponse, status_code=201)

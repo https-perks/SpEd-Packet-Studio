@@ -22,11 +22,17 @@ from backend.schemas.projects import (
     BackupResponse,
     DataSheetResponse,
     DataSheetsDraft,
+    ExportAllResponse,
     ExportRequest,
     ExportResponse,
     GoalResponse,
     GoalsDraft,
+    ObservationChecklistDraft,
+    PacketBuilderDraft,
+    PacketPageDraft,
     PacketVersionResponse,
+    PacketVersionConfig,
+    AssetPlacementDraft,
     ProjectDetail,
     ProjectSummary,
     ServiceAreaResponse,
@@ -51,6 +57,30 @@ DEFAULT_DATA_SHEET_COLUMNS = [
     {"id": "trial", "title": "Trial", "column_type": "text", "position": 1},
     {"id": "result", "title": "Result", "column_type": "text", "position": 2},
     {"id": "notes", "title": "Notes", "column_type": "notes", "position": 3},
+]
+
+DEFAULT_PACKET_PAGES = [
+    {"id": "cover", "title": "Cover Page", "page_type": "cover"},
+    {"id": "at_a_glance", "title": "At-a-Glance", "page_type": "at_a_glance"},
+    {"id": "accommodations", "title": "Accommodations/Modifications", "page_type": "placeholder"},
+    {"id": "behavior", "title": "Behavior Plans", "page_type": "placeholder"},
+    {"id": "goal_summary", "title": "Goal Summary", "page_type": "goal_summary"},
+    {"id": "services", "title": "Service Areas", "page_type": "services"},
+    {"id": "data_collection", "title": "Data Collection", "page_type": "data_collection"},
+    {"id": "observations", "title": "Observations & Notes", "page_type": "observations"},
+]
+
+DEFAULT_OBSERVATION_CHECKLIST = [
+    "Consistently struggling despite accommodations",
+    "Social concerns",
+    "Accommodations are not sufficient",
+    "Student requests additional help",
+    "New behavior concerns",
+    "Student refusing accommodations",
+    "Significant academic improvement",
+    "Medical / health concerns",
+    "Concerns from parents",
+    "Other observations",
 ]
 
 THEME_OPTIONS = [
@@ -163,9 +193,79 @@ def _theme_id(project: Project) -> str:
     return value if value in THEME_TOKENS else "teacher_friendly"
 
 
+def _observation_checklist(project: Project) -> list[str]:
+    value = (project.settings_json or {}).get("observation_checklist")
+    if not isinstance(value, list):
+        return DEFAULT_OBSERVATION_CHECKLIST
+    items = [str(item).strip() for item in value if str(item).strip()]
+    return items or DEFAULT_OBSERVATION_CHECKLIST
+
+
 def _packet_version_responses(project: Project) -> list[PacketVersionResponse]:
     return [
         PacketVersionResponse(id=version.id, name=version.name, audience=version.audience)
+        for version in sorted(project.packet_versions, key=lambda item: item.created_at)
+        if version.deleted_at is None
+    ]
+
+
+def _default_packet_pages() -> list[PacketPageDraft]:
+    return [
+        PacketPageDraft(
+            id=str(page["id"]),
+            title=str(page["title"]),
+            page_type=str(page["page_type"]),
+            enabled=True,
+            position=position,
+        )
+        for position, page in enumerate(DEFAULT_PACKET_PAGES)
+    ]
+
+
+def _packet_config(version: PacketVersion) -> PacketVersionConfig:
+    settings_json = deepcopy(version.settings_json or {})
+    raw_pages = settings_json.get("pages")
+    pages = []
+    if isinstance(raw_pages, list):
+        for index, page in enumerate(raw_pages):
+            if isinstance(page, dict):
+                pages.append(
+                    PacketPageDraft(
+                        id=str(page.get("id") or f"page-{index}"),
+                        title=str(page.get("title") or "Untitled Page"),
+                        page_type=str(page.get("page_type") or page.get("id") or "custom"),
+                        enabled=bool(page.get("enabled", True)),
+                        position=int(page.get("position") or index),
+                    )
+                )
+    existing_ids = {page.id for page in pages}
+    pages.extend(page for page in _default_packet_pages() if page.id not in existing_ids)
+    pages = sorted(pages, key=lambda item: item.position)
+
+    raw_assets = settings_json.get("asset_placements")
+    assets: list[AssetPlacementDraft] = []
+    if isinstance(raw_assets, list):
+        for index, asset in enumerate(raw_assets):
+            if isinstance(asset, dict):
+                assets.append(
+                    AssetPlacementDraft(
+                        id=str(asset.get("id") or f"asset-{index}"),
+                        label=str(asset.get("label") or ""),
+                        page_id=str(asset.get("page_id") or ""),
+                        position=int(asset.get("position") or index),
+                        notes=str(asset.get("notes") or ""),
+                    )
+                )
+    return PacketVersionConfig(
+        packet_version_id=version.id,
+        pages=pages,
+        asset_placements=sorted(assets, key=lambda item: item.position),
+    )
+
+
+def _packet_builder_configs(project: Project) -> list[PacketVersionConfig]:
+    return [
+        _packet_config(version)
         for version in sorted(project.packet_versions, key=lambda item: item.created_at)
         if version.deleted_at is None
     ]
@@ -267,7 +367,7 @@ def validate_data_sheets(data_sheets: Iterable[DataSheetResponse]) -> StepValida
                 issues.append(
                     ValidationIssue(field=f"data_sheets.{index}.{field}", message=message)
                 )
-        if not sheet.goal_ids:
+        if not sheet.is_observation_form and not sheet.goal_ids:
             issues.append(
                 ValidationIssue(
                     field=f"data_sheets.{index}.goal_ids",
@@ -403,6 +503,9 @@ def _data_sheet_response(sheet: DataSheet) -> DataSheetResponse:
             key=lambda column: column.get("position", 0),
         ),
         notes=str(configuration.get("notes") or ""),
+        template_name=str(configuration.get("template_name") or ""),
+        is_template=bool(configuration.get("is_template", False)),
+        is_observation_form=bool(configuration.get("is_observation_form", False)),
         position=int(configuration.get("position") or 0),
     )
 
@@ -446,6 +549,8 @@ def _detail(project: Project) -> ProjectDetail:
         ],
         audiences=draft.audiences,
         packet_versions=_packet_version_responses(project),
+        packet_builder=_packet_builder_configs(project),
+        observation_checklist=_observation_checklist(project),
         theme_id=_theme_id(project),
         goals=goals,
         at_a_glance=glance,
@@ -661,7 +766,7 @@ def save_data_sheets(
             session.delete(sheet)
 
     for position, value in enumerate(draft.data_sheets):
-        missing_goals = [goal_id for goal_id in value.goal_ids if goal_id not in available_goals]
+        missing_goals = [] if value.is_observation_form else [goal_id for goal_id in value.goal_ids if goal_id not in available_goals]
         if missing_goals:
             raise HTTPException(
                 status_code=422,
@@ -686,11 +791,12 @@ def save_data_sheets(
                 for column in sorted(value.columns, key=lambda item: item.position)
             ],
             "notes": value.notes,
+            "template_name": value.template_name,
+            "is_template": value.is_template,
+            "is_observation_form": value.is_observation_form,
             "position": position,
-            # TODO: Sprint 4 export should render these table definitions
-            # deterministically without copying goal-owned summary text.
         }
-        sheet.goals = [available_goals[goal_id] for goal_id in value.goal_ids]
+        sheet.goals = [] if value.is_observation_form else [available_goals[goal_id] for goal_id in value.goal_ids]
 
     _touch(project)
     session.commit()
@@ -825,6 +931,51 @@ def project_detail(session: Session, project_id: str) -> ProjectDetail:
     return _detail(get_project(session, project_id))
 
 
+def save_observation_checklist(
+    session: Session, project_id: str, draft: ObservationChecklistDraft
+) -> ProjectDetail:
+    project = get_project(session, project_id)
+    settings_json = deepcopy(project.settings_json or {})
+    settings_json["observation_checklist"] = [
+        item.strip() for item in draft.items if item.strip()
+    ]
+    project.settings_json = settings_json
+    _touch(project)
+    session.commit()
+    session.expire_all()
+    return _detail(get_project(session, project_id))
+
+
+def save_packet_builder(
+    session: Session, project_id: str, draft: PacketBuilderDraft
+) -> ProjectDetail:
+    project = get_project(session, project_id)
+    versions = {
+        version.id: version
+        for version in project.packet_versions
+        if version.deleted_at is None
+    }
+    for config in draft.packet_versions:
+        version = versions.get(config.packet_version_id)
+        if version is None:
+            raise HTTPException(status_code=422, detail="Packet builder references an unavailable packet version.")
+        settings_json = deepcopy(version.settings_json or {})
+        settings_json["pages"] = [
+            page.model_dump()
+            for page in sorted(config.pages, key=lambda item: item.position)
+        ]
+        settings_json["asset_placements"] = [
+            asset.model_dump()
+            for asset in sorted(config.asset_placements, key=lambda item: item.position)
+            if asset.label.strip()
+        ]
+        version.settings_json = settings_json
+    _touch(project)
+    session.commit()
+    session.expire_all()
+    return _detail(get_project(session, project_id))
+
+
 def _ensure_export_packet(project: Project, session: Session) -> PacketVersion:
     for version in project.packet_versions:
         if version.deleted_at is None and version.audience == "base_packet":
@@ -855,6 +1006,8 @@ def _resolve_packet_version(
 def _data_collection_items(detail: ProjectDetail):
     goals_by_id = {goal.id: goal for goal in detail.goals}
     for sheet in detail.data_sheets:
+        if sheet.is_observation_form:
+            continue
         for goal_id in sheet.goal_ids:
             goal = goals_by_id.get(goal_id)
             if goal is None:
@@ -868,6 +1021,30 @@ def _service_area_name(detail: ProjectDetail, service_area_id: str | None) -> st
         if area.id == service_area_id:
             return area.name
     return "Unassigned"
+
+
+def _ordered_packet_pages(
+    rendered_pages: dict[str, str], packet_config: PacketVersionConfig | None
+) -> list[str]:
+    if packet_config is None:
+        ordered_ids = [str(page["id"]) for page in DEFAULT_PACKET_PAGES]
+    else:
+        ordered_ids = [
+            page.id
+            for page in sorted(packet_config.pages, key=lambda item: item.position)
+            if page.enabled
+        ]
+    output: list[str] = []
+    for page_id in ordered_ids:
+        if page_id == "data_collection":
+            output.extend(
+                page
+                for key, page in rendered_pages.items()
+                if key.startswith("data_collection_")
+            )
+        elif page_id in rendered_pages:
+            output.append(rendered_pages[page_id])
+    return output
 
 
 def _packet_styles(theme_id: str) -> str:
@@ -1205,7 +1382,7 @@ def _packet_styles(theme_id: str) -> str:
     }
     .observations-table {
       flex: 0 0 auto;
-      height: 7.05in;
+      height: 6.78in;
     }
     .observations-table table,
     .observations-table tbody {
@@ -1215,29 +1392,27 @@ def _packet_styles(theme_id: str) -> str:
       height: auto;
       min-height: 34px;
     }
-    .check-grid {
-      display: grid;
-      gap: 4px 9px;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-    .check-item {
-      display: block;
+    .check-table {
+      border-collapse: collapse;
+      table-layout: fixed;
       width: 100%;
-      font-size: 10px;
-      line-height: 1.25;
-      margin: 0;
+    }
+    .check-table td {
+      border: 0;
+      font-size: 9px;
+      line-height: 1.18;
+      padding: 2px 12px 2px 0;
       overflow-wrap: normal;
-      padding-left: 10px;
-      text-indent: -10px;
-      white-space: normal;
+      vertical-align: top;
+      width: 50%;
       word-break: normal;
     }
-    .check-item:before {
+    .check-box {
       border: 1px solid __ORANGE__;
-      content: "";
       display: inline-block;
       height: 8px;
       margin-right: 5px;
+      vertical-align: -1px;
       width: 8px;
     }
     """
@@ -1274,6 +1449,24 @@ def _table(headers: list[str], rows: list[list[str]], *, blank_rows: int = 0) ->
     )
 
 
+def _checklist_table(items: list[str]) -> str:
+    rows = []
+    for index in range(0, len(items), 2):
+        first = items[index]
+        second = items[index + 1] if index + 1 < len(items) else ""
+        rows.append(
+            "<tr>"
+            f'<td><span class="check-box"></span>{escape(first)}</td>'
+            + (
+                f'<td><span class="check-box"></span>{escape(second)}</td>'
+                if second
+                else "<td></td>"
+            )
+            + "</tr>"
+        )
+    return '<table class="check-table"><tbody>' + "".join(rows) + "</tbody></table>"
+
+
 def _domain_class(value: str) -> str:
     lowered = value.lower()
     if any(term in lowered for term in ("writing", "written", "expression")):
@@ -1293,13 +1486,17 @@ def _service_symbol(value: str) -> str:
 
 
 def _build_packet_html(
-    detail: ProjectDetail, *, theme_id: str, packet_version_name: str
+    detail: ProjectDetail,
+    *,
+    theme_id: str,
+    packet_version_name: str,
+    packet_config: PacketVersionConfig | None = None,
 ) -> str:
     student = detail.student
     student_name = student.name if student else "Student"
     service_names = sorted({area.name for area in detail.service_areas if area.name})
 
-    pages: list[str] = []
+    rendered_pages: dict[str, str] = {}
     cover_chips = "".join(
         f"""
         <div class="service-chip">
@@ -1309,7 +1506,7 @@ def _build_packet_html(
         """
         for name in service_names[:4]
     )
-    pages.append(
+    rendered_pages["cover"] = (
         f"""
         <section class="page cover">
           <div class="cover-card">
@@ -1346,7 +1543,7 @@ def _build_packet_html(
         for section in detail.at_a_glance.sections
         if section.enabled and section.content.strip()
     ]
-    pages.append(
+    rendered_pages["at_a_glance"] = (
         """
         <section class="page">
           <div class="page-header">
@@ -1366,7 +1563,7 @@ def _build_packet_html(
         + "</section>"
     )
 
-    pages.append(
+    rendered_pages["accommodations"] = (
         """
         <section class="page">
           <div class="page-header green">
@@ -1377,7 +1574,7 @@ def _build_packet_html(
         </section>
         """
     )
-    pages.append(
+    rendered_pages["behavior"] = (
         """
         <section class="page">
           <div class="page-header green">
@@ -1415,7 +1612,7 @@ def _build_packet_html(
             """
             for goal in area_goals
         )
-    pages.append(
+    rendered_pages["goal_summary"] = (
         """
         <section class="page">
           <div class="page-header">
@@ -1427,7 +1624,7 @@ def _build_packet_html(
         + "</section>"
     )
 
-    pages.append(
+    rendered_pages["services"] = (
         """
         <section class="page">
           <div class="page-header">
@@ -1473,7 +1670,7 @@ def _build_packet_html(
     for sheet, goal, instance in _data_collection_items(detail):
         service_name = _service_area_name(detail, goal.service_area_id)
         domain_class = _domain_class(service_name)
-        pages.append(
+        rendered_pages[f"data_collection_{sheet.id}_{goal.id}_{instance}"] = (
             f"""
             <section class="page">
               <div class="page-header {domain_class}">
@@ -1492,40 +1689,54 @@ def _build_packet_html(
             """
         )
 
-    pages.append(
-        f"""
-        <section class="page observation-page">
-          <div class="page-header orange">
-            <span class="badge orange">N</span>
-            <h2>Observations & Notes</h2>
-          </div>
-          <div class="observations-table">
-            {_table(["Date", "Setting / Context", "Observation", "Follow-up / Action"], [], blank_rows=17)}
-          </div>
-          <div class="staff-checklist" style="margin-top: 18px;">
-            <h3 style="color: #ef7900;">Things Staff Need To Tell {escape(student.case_manager if student and student.case_manager else "The Case Manager")}</h3>
-            <div class="check-grid">
-              <p class="check-item">Consistently struggling despite accommodations</p>
-              <p class="check-item">Social concerns</p>
-              <p class="check-item">Accommodations are not sufficient</p>
-              <p class="check-item">Student requests additional help</p>
-              <p class="check-item">New behavior concerns</p>
-              <p class="check-item">Student refusing accommodations</p>
-              <p class="check-item">Significant academic improvement</p>
-              <p class="check-item">Medical / health concerns</p>
-              <p class="check-item">Concerns from parents</p>
-              <p class="check-item">Other observations</p>
-            </div>
-          </div>
-        </section>
-        """
-    )
+    observation_forms = [sheet for sheet in detail.data_sheets if sheet.is_observation_form]
+    checklist_items = detail.observation_checklist or DEFAULT_OBSERVATION_CHECKLIST
+    checklist_html = f"""
+      <div class="staff-checklist" style="margin-top: 12px;">
+        <h3 style="color: #ef7900;">Things Staff Need To Tell {escape(student.case_manager if student and student.case_manager else "The Case Manager")}</h3>
+        {_checklist_table(checklist_items)}
+      </div>
+    """
+
+    if observation_forms:
+        rendered_pages["observations"] = "".join(
+            f"""
+            <section class="page observation-page">
+              <div class="page-header orange">
+                <span class="badge orange">O</span>
+                <h2>{escape(sheet.title or "Observation Sheet")}</h2>
+              </div>
+              <p class="muted">{escape(sheet.collection_schedule or "General observation form")}</p>
+              <div class="observations-table">
+                {_table([column.title for column in sheet.columns], [], blank_rows=17)}
+              </div>
+              {f'<div class="soft-card" style="margin-top: 8px;"><p>{escape(sheet.notes)}</p></div>' if sheet.notes else ''}
+              {checklist_html if index == len(observation_forms) - 1 else ''}
+            </section>
+            """
+            for index, sheet in enumerate(observation_forms)
+        )
+    else:
+        rendered_pages["observations"] = (
+            f"""
+            <section class="page observation-page">
+              <div class="page-header orange">
+                <span class="badge orange">N</span>
+                <h2>Observations & Notes</h2>
+              </div>
+              <div class="observations-table">
+                {_table(["Date", "Setting / Context", "Observation", "Follow-up / Action"], [], blank_rows=17)}
+              </div>
+              {checklist_html}
+            </section>
+            """
+        )
 
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         f"<title>{escape(detail.name)}</title><style>{_packet_styles(theme_id)}</style>"
         "</head><body>"
-        + "".join(pages)
+        + "".join(_ordered_packet_pages(rendered_pages, packet_config))
         + "</body></html>"
     )
 
@@ -1568,6 +1779,7 @@ def generate_pdf_export(
         detail,
         theme_id=request.theme_id,
         packet_version_name=packet.name,
+        packet_config=_packet_config(packet),
     )
     try:
         pdf_bytes = render_pdf(PdfRenderRequest(html=html, base_url=str(settings.data_dir)))
@@ -1610,6 +1822,25 @@ def generate_pdf_export(
     packet = _resolve_packet_version(refreshed, session, packet.id)
     latest = max(packet.exports, key=lambda item: item.generated_at)
     return _export_response(latest, project_id)
+
+
+def generate_all_pdf_exports(
+    session: Session, project_id: str, request: ExportRequest | None = None
+) -> ExportAllResponse:
+    request = request or ExportRequest()
+    project = get_project(session, project_id)
+    versions = [version for version in project.packet_versions if version.deleted_at is None]
+    if not versions:
+        versions = [_ensure_export_packet(project, session)]
+    exports = [
+        generate_pdf_export(
+            session,
+            project_id,
+            ExportRequest(packet_version_id=version.id, theme_id=request.theme_id),
+        )
+        for version in versions
+    ]
+    return ExportAllResponse(exports=exports)
 
 
 def get_export_path(session: Session, project_id: str, export_id: str) -> Path:

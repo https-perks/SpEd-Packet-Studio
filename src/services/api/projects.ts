@@ -2,10 +2,12 @@ import type {
   AtAGlanceSection,
   BackupResult,
   DataSheetDraft,
+  ExportAllResult,
   ExportResult,
   ThemeOption,
   GoalDraft,
   ProjectDetail,
+  PacketVersionConfig,
   ProjectSummary,
   StudentSetupDraft,
 } from "../../types/projects";
@@ -84,6 +86,18 @@ export function saveDataSheets(
   });
 }
 
+export function savePacketBuilder(
+  projectId: string,
+  packetVersions: readonly PacketVersionConfig[],
+  signal?: AbortSignal,
+) {
+  return apiRequest<ProjectDetail>(`/projects/${projectId}/packet-builder`, {
+    method: "PUT",
+    body: { packet_versions: packetVersions },
+    signal,
+  });
+}
+
 export function listThemes() {
   return apiGet<ThemeOption[]>("/projects/themes");
 }
@@ -95,6 +109,18 @@ export function saveProjectTheme(projectId: string, themeId: string) {
   });
 }
 
+export function saveObservationChecklist(
+  projectId: string,
+  items: readonly string[],
+  signal?: AbortSignal,
+) {
+  return apiRequest<ProjectDetail>(`/projects/${projectId}/observation-checklist`, {
+    method: "PUT",
+    body: { items },
+    signal,
+  });
+}
+
 export function generatePdfExport(
   projectId: string,
   options: { packetVersionId?: string | null; themeId?: string } = {},
@@ -103,6 +129,19 @@ export function generatePdfExport(
     method: "POST",
     body: {
       packet_version_id: options.packetVersionId ?? null,
+      theme_id: options.themeId ?? "teacher_friendly",
+    },
+  });
+}
+
+export function generateAllPdfExports(
+  projectId: string,
+  options: { themeId?: string } = {},
+) {
+  return apiRequest<ExportAllResult>(`/projects/${projectId}/exports/pdf/all`, {
+    method: "POST",
+    body: {
+      packet_version_id: null,
       theme_id: options.themeId ?? "teacher_friendly",
     },
   });

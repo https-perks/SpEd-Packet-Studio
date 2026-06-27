@@ -81,6 +81,9 @@ export interface DataSheetDraft {
   blank_instance_count: number;
   columns: DataSheetColumnDraft[];
   notes: string;
+  template_name: string;
+  is_template: boolean;
+  is_observation_form: boolean;
   position: number;
 }
 
@@ -102,10 +105,36 @@ export interface ExportResult {
   readonly download_url: string;
 }
 
+export interface ExportAllResult {
+  readonly exports: readonly ExportResult[];
+}
+
 export interface PacketVersion {
   readonly id: string;
   readonly name: string;
   readonly audience: string;
+}
+
+export interface PacketPageDraft {
+  id: string;
+  title: string;
+  page_type: string;
+  enabled: boolean;
+  position: number;
+}
+
+export interface AssetPlacementDraft {
+  id: string;
+  label: string;
+  page_id: string;
+  position: number;
+  notes: string;
+}
+
+export interface PacketVersionConfig {
+  packet_version_id: string;
+  pages: PacketPageDraft[];
+  asset_placements: AssetPlacementDraft[];
 }
 
 export interface ThemeOption {
@@ -142,6 +171,8 @@ export interface ProjectDetail {
   readonly service_areas: readonly (ServiceAreaDraft & { readonly id: string })[];
   readonly audiences: readonly Audience[];
   readonly packet_versions: readonly PacketVersion[];
+  readonly packet_builder: readonly PacketVersionConfig[];
+  readonly observation_checklist: readonly string[];
   readonly theme_id: string;
   readonly goals: readonly (GoalDraft & { readonly id: string })[];
   readonly at_a_glance: {

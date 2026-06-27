@@ -74,7 +74,7 @@ export function validateDataSheets(
         message: "Enter at least one blank table instance for the packet.",
       });
     }
-    if (!sheet.goal_ids.length) {
+    if (!sheet.is_observation_form && !sheet.goal_ids.length) {
       issues.push({ field: `data_sheets.${index}.goal_ids`, message: "Attach at least one goal." });
     }
     if (!sheet.columns.length) {

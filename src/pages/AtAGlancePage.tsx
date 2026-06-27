@@ -95,7 +95,7 @@ export function AtAGlancePage({
   return (
     <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
       <WorkflowHeader
-        eyebrow="Step 3 of 6"
+        eyebrow="Step 2 of 7"
         title="At-a-Glance Builder"
         description="Create a concise, practical summary that educators can read in under one minute."
         status={autosave.status}

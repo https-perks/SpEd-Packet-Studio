@@ -131,6 +131,9 @@ class DataSheetDraft(ApiSchema):
     blank_instance_count: int = Field(default=1, ge=1, le=100)
     columns: list[DataSheetColumnDraft] = Field(default_factory=list)
     notes: str = ""
+    template_name: str = Field(default="", max_length=160)
+    is_template: bool = False
+    is_observation_form: bool = False
     position: int = Field(default=0, ge=0)
 
 
@@ -153,6 +156,10 @@ class ExportResponse(ApiSchema):
     download_url: str
 
 
+class ExportAllResponse(ApiSchema):
+    exports: list[ExportResponse] = Field(default_factory=list)
+
+
 class ExportRequest(ApiSchema):
     packet_version_id: str | None = None
     theme_id: str = "teacher_friendly"
@@ -164,6 +171,32 @@ class PacketVersionResponse(ApiSchema):
     audience: str
 
 
+class PacketPageDraft(ApiSchema):
+    id: str = Field(max_length=80)
+    title: str = Field(max_length=160)
+    page_type: str = Field(max_length=80)
+    enabled: bool = True
+    position: int = Field(default=0, ge=0)
+
+
+class AssetPlacementDraft(ApiSchema):
+    id: str = Field(max_length=80)
+    label: str = Field(default="", max_length=160)
+    page_id: str = Field(default="", max_length=80)
+    position: int = Field(default=0, ge=0)
+    notes: str = ""
+
+
+class PacketVersionConfig(ApiSchema):
+    packet_version_id: str
+    pages: list[PacketPageDraft] = Field(default_factory=list)
+    asset_placements: list[AssetPlacementDraft] = Field(default_factory=list)
+
+
+class PacketBuilderDraft(ApiSchema):
+    packet_versions: list[PacketVersionConfig] = Field(default_factory=list)
+
+
 class ThemeOption(ApiSchema):
     id: str
     name: str
@@ -172,6 +205,10 @@ class ThemeOption(ApiSchema):
 
 class ThemeSelection(ApiSchema):
     theme_id: str = "teacher_friendly"
+
+
+class ObservationChecklistDraft(ApiSchema):
+    items: list[str] = Field(default_factory=list)
 
 
 class BackupResponse(ApiSchema):
@@ -202,6 +239,8 @@ class ProjectDetail(ApiSchema):
     service_areas: list[ServiceAreaResponse]
     audiences: list[Audience]
     packet_versions: list[PacketVersionResponse]
+    packet_builder: list[PacketVersionConfig] = Field(default_factory=list)
+    observation_checklist: list[str] = Field(default_factory=list)
     theme_id: str
     goals: list[GoalResponse]
     at_a_glance: AtAGlanceResponse
