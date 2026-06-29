@@ -164,7 +164,7 @@ export function PacketDesignerPage({
     <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
       <WorkflowHeader
         eyebrow="Step 6 of 7"
-        title="Packet Designer"
+        title={`Packet Designer${project.student?.name ? ` - ${project.student.name}` : ""}`}
         description="Choose which pages belong in each packet version, order them, and reserve asset placement slots."
         status={autosave.status}
       />
@@ -193,6 +193,7 @@ export function PacketDesignerPage({
             {selectedConfig?.pages.map((page, index) => (
               <div
                 key={page.id}
+                onMouseEnter={() => moveDraggedPage(index)}
                 onPointerEnter={() => moveDraggedPage(index)}
                 onDragOver={(event) => {
                   event.preventDefault();
@@ -212,10 +213,16 @@ export function PacketDesignerPage({
                     type="button"
                     aria-label={`Drag ${page.title}`}
                     title="Hold and drag to reorder"
-                    onPointerDown={(event) => {
-                      event.preventDefault();
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", String(index));
                       setDraggedPageIndex(index);
                     }}
+                    onDragEnd={() => setDraggedPageIndex(null)}
+                    onMouseDown={() => setDraggedPageIndex(index)}
+                    onMouseUp={() => setDraggedPageIndex(null)}
+                    onPointerDown={() => setDraggedPageIndex(index)}
                     onPointerUp={() => setDraggedPageIndex(null)}
                     className="mt-0.5 cursor-grab select-none rounded-lg border border-[var(--theme-border)] px-2 py-1 text-xs font-semibold text-[var(--theme-text-muted)] active:cursor-grabbing"
                   >

@@ -72,6 +72,11 @@ function initialDraft(project: ProjectDetail): StudentSetupDraft {
         grade: project.student.grade,
         school: project.student.school,
         case_manager: project.student.case_manager,
+        case_manager_first_name: project.student.case_manager_first_name,
+        case_manager_last_name: project.student.case_manager_last_name,
+        case_manager_phone: project.student.case_manager_phone,
+        case_manager_email: project.student.case_manager_email,
+        case_manager_notes: project.student.case_manager_notes,
         iep_end_date: project.student.iep_end_date,
       }
     : {
@@ -80,6 +85,11 @@ function initialDraft(project: ProjectDetail): StudentSetupDraft {
         grade: "",
         school: "",
         case_manager: "",
+        case_manager_first_name: "",
+        case_manager_last_name: "",
+        case_manager_phone: "",
+        case_manager_email: "",
+        case_manager_notes: "",
         iep_end_date: null,
       };
 
@@ -151,6 +161,12 @@ export function StudentSetupPage({
   function updateStudent(field: keyof StudentSetupDraft["student"], value: string) {
     setDraft((current) => {
       const student = { ...current.student, [field]: value };
+      if (field === "case_manager_first_name" || field === "case_manager_last_name") {
+        student.case_manager = [student.case_manager_first_name, student.case_manager_last_name]
+          .map((part) => part.trim())
+          .filter(Boolean)
+          .join(" ");
+      }
       const next = { ...current, student };
       if (field === "name") {
         if (!current.student.initials || current.student.initials === deriveInitials(current.student.name)) {
@@ -219,7 +235,7 @@ export function StudentSetupPage({
     <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
       <WorkflowHeader
         eyebrow="Step 1 of 7"
-        title="Student Setup"
+        title={`Student Setup${project.student?.name ? ` - ${project.student.name}` : ""}`}
         description="Create the student profile, service areas, and initial packet audiences that every later step will reference."
         status={autosave.status}
       />
@@ -244,7 +260,7 @@ export function StudentSetupPage({
                 placeholder="First and last name"
               />
             </FieldFrame>
-            <FieldFrame label="Initials" htmlFor="initials" hint="Generated automatically; you may override it.">
+            <FieldFrame label="Initials" htmlFor="initials">
               <TextInput
                 id="initials"
                 value={draft.student.initials}
@@ -263,18 +279,63 @@ export function StudentSetupPage({
             <FieldFrame label="School" htmlFor="school">
               <TextInput id="school" value={draft.student.school} onChange={(event) => updateStudent("school", event.target.value)} />
             </FieldFrame>
-            <FieldFrame label="Case manager" htmlFor="case-manager">
-              <TextInput id="case-manager" value={draft.student.case_manager} onChange={(event) => updateStudent("case_manager", event.target.value)} />
-            </FieldFrame>
             <FieldFrame label="IEP end date" htmlFor="iep-end" required error={fieldError("student.iep_end_date")}>
               <TextInput id="iep-end" type="date" value={draft.student.iep_end_date ?? ""} onChange={(event) => updateStudent("iep_end_date", event.target.value)} />
             </FieldFrame>
-            <FieldFrame label="School year" htmlFor="school-year" hint="Suggested from the IEP end date.">
+            <FieldFrame label="School year" htmlFor="school-year">
               <TextInput id="school-year" value={draft.school_year} onChange={(event) => setDraft((current) => ({ ...current, school_year: event.target.value }))} placeholder="2026-2027" />
             </FieldFrame>
-            <FieldFrame label="Project name" htmlFor="project-name" hint="Generated from the student and school year.">
+            <FieldFrame label="Project name" htmlFor="project-name">
               <TextInput id="project-name" value={draft.project_name} onChange={(event) => setDraft((current) => ({ ...current, project_name: event.target.value }))} />
             </FieldFrame>
+          </div>
+        </Card>
+
+        <Card
+          title="Case manager"
+          description="This contact information appears in the Team Contacts box on the Service Information page."
+        >
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+            <FieldFrame label="First name" htmlFor="case-manager-first">
+              <TextInput
+                id="case-manager-first"
+                value={draft.student.case_manager_first_name}
+                onChange={(event) => updateStudent("case_manager_first_name", event.target.value)}
+              />
+            </FieldFrame>
+            <FieldFrame label="Last name" htmlFor="case-manager-last">
+              <TextInput
+                id="case-manager-last"
+                value={draft.student.case_manager_last_name}
+                onChange={(event) => updateStudent("case_manager_last_name", event.target.value)}
+              />
+            </FieldFrame>
+            <FieldFrame label="Phone number" htmlFor="case-manager-phone">
+              <TextInput
+                id="case-manager-phone"
+                type="tel"
+                value={draft.student.case_manager_phone}
+                onChange={(event) => updateStudent("case_manager_phone", event.target.value)}
+              />
+            </FieldFrame>
+            <FieldFrame label="Email" htmlFor="case-manager-email">
+              <TextInput
+                id="case-manager-email"
+                type="email"
+                value={draft.student.case_manager_email}
+                onChange={(event) => updateStudent("case_manager_email", event.target.value)}
+              />
+            </FieldFrame>
+            <div className="md:col-span-2 xl:col-span-4">
+              <FieldFrame label="Notes" htmlFor="case-manager-notes">
+                <TextArea
+                  id="case-manager-notes"
+                  value={draft.student.case_manager_notes}
+                  onChange={(event) => updateStudent("case_manager_notes", event.target.value)}
+                  placeholder="Preferred contact times, role notes, or internal reminders"
+                />
+              </FieldFrame>
+            </div>
           </div>
         </Card>
 

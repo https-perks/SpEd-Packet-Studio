@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import date, datetime
 from typing import Literal
 
@@ -29,12 +31,62 @@ class ProjectCreate(ApiSchema):
     name: str | None = Field(default=None, max_length=200)
 
 
+class ProjectSearchFilters(ApiSchema):
+    archived: bool = False
+    search: str = Field(default="", max_length=200)
+    grade: str = Field(default="", max_length=32)
+    school_year: str = Field(default="", max_length=20)
+    case_manager: str = Field(default="", max_length=200)
+    service_area: str = Field(default="", max_length=160)
+    theme_id: str = Field(default="", max_length=80)
+    missing_data_sheets: bool = False
+
+
+class DuplicateOptions(ApiSchema):
+    student_information: bool = True
+    service_areas: bool = True
+    goals: bool = True
+    at_a_glance: bool = False
+    observation_notes: bool = False
+    data_sheets: bool = False
+    theme: bool = True
+    template: bool = True
+    packet_layout: bool = True
+
+
+class BulkProjectAction(ApiSchema):
+    project_ids: list[str] = Field(default_factory=list, min_length=1)
+    action: Literal[
+        "archive",
+        "restore",
+        "duplicate",
+        "assign_theme",
+        "update_template",
+        "update_school_year",
+        "assign_export_location",
+        "export",
+        "delete",
+        "rename",
+    ]
+    theme_id: str | None = None
+    packet_template_id: str | None = None
+    school_year: str | None = Field(default=None, max_length=20)
+    export_location: str | None = Field(default=None, max_length=1024)
+    project_name: str | None = Field(default=None, max_length=240)
+    duplicate_options: DuplicateOptions = Field(default_factory=DuplicateOptions)
+
+
 class StudentDraft(ApiSchema):
     name: str = Field(default="", max_length=200)
     initials: str = Field(default="", max_length=12)
     grade: str = Field(default="", max_length=32)
     school: str = Field(default="", max_length=200)
     case_manager: str = Field(default="", max_length=200)
+    case_manager_first_name: str = Field(default="", max_length=100)
+    case_manager_last_name: str = Field(default="", max_length=100)
+    case_manager_phone: str = Field(default="", max_length=80)
+    case_manager_email: str = Field(default="", max_length=200)
+    case_manager_notes: str = Field(default="", max_length=1000)
     iep_end_date: date | None = None
 
     @field_validator("iep_end_date", mode="before")
@@ -163,6 +215,9 @@ class ExportAllResponse(ApiSchema):
 class ExportRequest(ApiSchema):
     packet_version_id: str | None = None
     theme_id: str = "teacher_friendly"
+    packet_template_id: str | None = None
+    filename_template: str | None = Field(default=None, max_length=240)
+    export_mode: Literal["single_pdf", "zip_archive"] = "single_pdf"
 
 
 class PacketVersionResponse(ApiSchema):
@@ -201,10 +256,119 @@ class ThemeOption(ApiSchema):
     id: str
     name: str
     description: str
+    category: str = "Built-in"
+    default_customization: dict[str, object] = Field(default_factory=dict)
+
+
+class PacketTemplateOption(ApiSchema):
+    id: str
+    name: str
+    description: str
+    category: str
+    cover_style: str
+    best_for: str
+    page_count_hint: str
+
+
+class ThemeCustomization(ApiSchema):
+    primary_color: str = Field(default="#0f2d55", max_length=24)
+    secondary_color: str = Field(default="#27b8b2", max_length=24)
+    accent_color: str = Field(default="#ef7900", max_length=24)
+    background_color: str = Field(default="#f3f7fc", max_length=24)
+    card_color: str = Field(default="#ffffff", max_length=24)
+    text_color: str = Field(default="#12213a", max_length=24)
+    service_area_colors: dict[str, str] = Field(default_factory=dict)
+
+
+class BrandKit(ApiSchema):
+    id: str = Field(default="personal", max_length=80)
+    name: str = Field(default="Personal Brand Kit", max_length=160)
+    district_name: str = Field(default="", max_length=200)
+    school_name: str = Field(default="", max_length=200)
+    district_logo_label: str = Field(default="", max_length=200)
+    school_logo_label: str = Field(default="", max_length=200)
+    logo_relative_path: str = Field(default="", max_length=1024)
+    logo_filename: str = Field(default="", max_length=255)
+    watermark_enabled: bool = False
+    default_fonts: str = Field(default="", max_length=200)
+    primary_color: str = Field(default="#0f2d55", max_length=24)
+    secondary_color: str = Field(default="#27b8b2", max_length=24)
+    accent_color: str = Field(default="#ef7900", max_length=24)
+    preferred_cover_style: str = Field(default="modern_professional", max_length=80)
+    footer_text: str = Field(default="", max_length=300)
+    default_filename_template: str = Field(
+        default="",
+        max_length=240,
+    )
+
+
+class ExportSettings(ApiSchema):
+    filename_template: str = Field(
+        default="",
+        max_length=240,
+    )
+    last_export_location: str = Field(default="", max_length=1024)
+    export_mode: Literal["single_pdf", "zip_archive"] = "single_pdf"
 
 
 class ThemeSelection(ApiSchema):
     theme_id: str = "teacher_friendly"
+    packet_template_id: str = "modern_professional"
+    customization: ThemeCustomization = Field(default_factory=ThemeCustomization)
+    brand_kit: BrandKit = Field(default_factory=BrandKit)
+
+
+class BrandLogoUpload(ApiSchema):
+    filename: str = Field(max_length=255)
+    content_type: str = Field(max_length=100)
+    data_base64: str
+
+
+class PacketTemplateLibraryItem(PacketTemplateOption):
+    base_template_id: str = "modern_professional"
+    theme_id: str = "teacher_friendly"
+    customization: ThemeCustomization = Field(default_factory=ThemeCustomization)
+    is_builtin: bool = False
+    is_default: bool = False
+
+
+class PacketTemplateLibraryDraft(ApiSchema):
+    name: str = Field(default="", max_length=160)
+    description: str = Field(default="", max_length=300)
+    category: str = Field(default="Custom", max_length=80)
+    base_template_id: str = Field(default="modern_professional", max_length=80)
+    theme_id: str = Field(default="teacher_friendly", max_length=80)
+    customization: ThemeCustomization = Field(default_factory=ThemeCustomization)
+
+
+class BrandKitLibraryItem(BrandKit):
+    is_default: bool = False
+
+
+class BrandKitLibraryDraft(ApiSchema):
+    name: str = Field(default="Brand Kit", max_length=160)
+    district_name: str = Field(default="", max_length=200)
+    school_name: str = Field(default="", max_length=200)
+    district_logo_label: str = Field(default="", max_length=200)
+    school_logo_label: str = Field(default="", max_length=200)
+    logo_relative_path: str = Field(default="", max_length=1024)
+    logo_filename: str = Field(default="", max_length=255)
+    watermark_enabled: bool = False
+    default_fonts: str = Field(default="", max_length=200)
+    primary_color: str = Field(default="#0f2d55", max_length=24)
+    secondary_color: str = Field(default="#27b8b2", max_length=24)
+    accent_color: str = Field(default="#ef7900", max_length=24)
+    preferred_cover_style: str = Field(default="modern_professional", max_length=80)
+    footer_text: str = Field(default="", max_length=300)
+    default_filename_template: str = Field(default="", max_length=240)
+
+
+class BrandKitLogoUpload(BrandLogoUpload):
+    brand_kit_id: str = Field(max_length=80)
+
+
+class ExportSettingsSelection(ApiSchema):
+    export_settings: ExportSettings = Field(default_factory=ExportSettings)
 
 
 class ObservationChecklistDraft(ApiSchema):
@@ -227,7 +391,18 @@ class ProjectSummary(ApiSchema):
     grade: str
     updated_at: datetime
     archived: bool
+    case_manager: str = ""
+    service_areas: list[str] = Field(default_factory=list)
+    theme_id: str = "teacher_friendly"
+    missing_data_sheets: bool = False
     current_step: Literal["student_setup", "goals", "at_a_glance", "data_sheets", "complete"]
+
+
+class BulkProjectActionResponse(ApiSchema):
+    projects: list[ProjectSummary] = Field(default_factory=list)
+    duplicated_projects: list[ProjectDetail] = Field(default_factory=list)
+    exports: list[ExportResponse] = Field(default_factory=list)
+    deleted_project_ids: list[str] = Field(default_factory=list)
 
 
 class ProjectDetail(ApiSchema):
@@ -242,6 +417,10 @@ class ProjectDetail(ApiSchema):
     packet_builder: list[PacketVersionConfig] = Field(default_factory=list)
     observation_checklist: list[str] = Field(default_factory=list)
     theme_id: str
+    packet_template_id: str
+    theme_customization: ThemeCustomization
+    brand_kit: BrandKit
+    export_settings: ExportSettings
     goals: list[GoalResponse]
     at_a_glance: AtAGlanceResponse
     data_sheets: list[DataSheetResponse]

@@ -7,17 +7,20 @@ import { WorkflowHeader } from "../components/workflow/WorkflowHeader";
 import {
   createProjectBackup,
   exportDownloadUrl,
-  generateAllPdfExports,
   generatePdfExport,
-  listThemes,
+  listPacketTemplates,
+  previewPdfExport,
+  saveExportSettings,
   saveProjectTheme,
 } from "../services/api/projects";
 import type {
   BackupResult,
+  ExportMode,
+  ExportSettings,
   ExportResult,
+  PacketTemplateOption,
   ProjectDetail,
   StepValidation,
-  ThemeOption,
 } from "../types/projects";
 
 function combinedValidation(project: ProjectDetail): StepValidation {
@@ -50,24 +53,26 @@ export function ReviewExportPage({
   onComplete,
 }: ReviewExportPageProps) {
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
-  const [allExportResults, setAllExportResults] = useState<readonly ExportResult[]>([]);
   const [backupResult, setBackupResult] = useState<BackupResult | null>(null);
-  const [themes, setThemes] = useState<ThemeOption[]>([]);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [packetTemplates, setPacketTemplates] = useState<PacketTemplateOption[]>([]);
   const [selectedThemeId, setSelectedThemeId] = useState(project.theme_id || "teacher_friendly");
+  const [selectedTemplateId, setSelectedTemplateId] = useState(project.packet_template_id || "modern_professional");
+  const [exportSettings, setExportSettings] = useState<ExportSettings>(project.export_settings);
   const [selectedPacketVersionId, setSelectedPacketVersionId] = useState(
     project.packet_versions[0]?.id ?? "",
   );
   const [exporting, setExporting] = useState(false);
-  const [exportingAll, setExportingAll] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
   const validation = combinedValidation(project);
 
   useEffect(() => {
-    void listThemes()
-      .then(setThemes)
-      .catch(() => setThemes([]));
+    void listPacketTemplates()
+      .then(setPacketTemplates)
+      .catch(() => setPacketTemplates([]));
   }, []);
 
   async function handleExport() {
@@ -77,6 +82,9 @@ export function ReviewExportPage({
       const result = await generatePdfExport(project.id, {
         packetVersionId: selectedPacketVersionId || null,
         themeId: selectedThemeId,
+        packetTemplateId: selectedTemplateId,
+        filenameTemplate: exportSettings.filename_template,
+        exportMode: exportSettings.export_mode,
       });
       setExportResult(result);
       onComplete();
@@ -87,31 +95,56 @@ export function ReviewExportPage({
     }
   }
 
-  async function handleExportAll() {
-    setExportingAll(true);
+  async function handlePreview() {
+    setPreviewing(true);
     setError("");
     try {
-      const result = await generateAllPdfExports(project.id, {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      const blob = await previewPdfExport(project.id, {
+        packetVersionId: selectedPacketVersionId || null,
         themeId: selectedThemeId,
+        packetTemplateId: selectedTemplateId,
+        filenameTemplate: exportSettings.filename_template,
+        exportMode: "single_pdf",
       });
-      setAllExportResults(result.exports);
-      setExportResult(result.exports[0] ?? null);
-      onComplete();
+      setPreviewUrl(URL.createObjectURL(blob));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "The packet versions could not be exported.");
+      setError(reason instanceof Error ? reason.message : "The PDF preview could not be created.");
     } finally {
-      setExportingAll(false);
+      setPreviewing(false);
     }
   }
 
-  async function handleThemeChange(themeId: string) {
+  async function saveThemeSettings(next: {
+    themeId?: string;
+    templateId?: string;
+  }) {
+    const themeId = next.themeId ?? selectedThemeId;
+    const templateId = next.templateId ?? selectedTemplateId;
     setSelectedThemeId(themeId);
+    setSelectedTemplateId(templateId);
     setError("");
     try {
-      const saved = await saveProjectTheme(project.id, themeId);
+      const saved = await saveProjectTheme(project.id, {
+        theme_id: themeId,
+        packet_template_id: templateId,
+        theme_customization: project.theme_customization,
+        brand_kit: project.brand_kit,
+      });
       onProjectUpdate(saved);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "The theme could not be saved.");
+      setError(reason instanceof Error ? reason.message : "The theme settings could not be saved.");
+    }
+  }
+
+  async function saveExportOptions(next: ExportSettings) {
+    setExportSettings(next);
+    setError("");
+    try {
+      const saved = await saveExportSettings(project.id, next);
+      onProjectUpdate(saved);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The export settings could not be saved.");
     }
   }
 
@@ -144,11 +177,23 @@ export function ReviewExportPage({
     }
   }
 
+  async function handleSelectFolder() {
+    setError("");
+    try {
+      const folder = await invoke<string | null>("select_folder");
+      if (folder) {
+        await saveExportOptions({ ...exportSettings, last_export_location: folder });
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The save folder could not be selected.");
+    }
+  }
+
   return (
     <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
       <WorkflowHeader
         eyebrow="Step 7 of 7"
-        title="Review & Export"
+        title={`Review & Export${project.student?.name ? ` - ${project.student.name}` : ""}`}
         description="Confirm the packet is complete, then generate a deterministic PDF from the backend packet builder."
       />
 
@@ -165,28 +210,7 @@ export function ReviewExportPage({
             completeMessage="All required packet sections are ready for export."
           />
 
-          <Card title="Export checklist" description="The PDF is generated from the same owned objects used by Packet Designer.">
-            <dl className="grid gap-4 text-sm md:grid-cols-2">
-              <div className="rounded-xl border border-[var(--theme-border)] bg-white p-4">
-                <dt className="font-semibold text-[var(--theme-text-muted)]">Student</dt>
-                <dd className="mt-1 text-[var(--theme-text)]">{project.student?.name || "Not entered"}</dd>
-              </div>
-              <div className="rounded-xl border border-[var(--theme-border)] bg-white p-4">
-                <dt className="font-semibold text-[var(--theme-text-muted)]">Filename</dt>
-                <dd className="mt-1 break-words text-[var(--theme-text)]">{project.default_export_filename}</dd>
-              </div>
-              <div className="rounded-xl border border-[var(--theme-border)] bg-white p-4">
-                <dt className="font-semibold text-[var(--theme-text-muted)]">Goals</dt>
-                <dd className="mt-1 text-[var(--theme-text)]">{project.goals.length}</dd>
-              </div>
-              <div className="rounded-xl border border-[var(--theme-border)] bg-white p-4">
-                <dt className="font-semibold text-[var(--theme-text-muted)]">Data sheet definitions</dt>
-                <dd className="mt-1 text-[var(--theme-text)]">{project.data_sheets.length}</dd>
-              </div>
-            </dl>
-          </Card>
-
-          <Card title="Version 1.0 export options" description="Packet versions and themes never duplicate student data.">
+          <Card title="Packet version" description="Choose the staff audience to export.">
             <div className="grid gap-4 md:grid-cols-2">
               <label className="text-sm font-semibold text-[var(--theme-text)]">
                 Packet version
@@ -203,82 +227,28 @@ export function ReviewExportPage({
                   ))}
                 </select>
               </label>
-              <label className="text-sm font-semibold text-[var(--theme-text)]">
-                Packet theme
-                <select
-                  className="mt-2 w-full rounded-xl border border-[var(--theme-border)] bg-white px-3.5 py-2.5 text-sm shadow-sm outline-none focus:border-[var(--theme-primary)] focus:ring-2 focus:ring-[var(--theme-primary-soft)]"
-                  value={selectedThemeId}
-                  onChange={(event) => void handleThemeChange(event.target.value)}
-                >
-                  {(themes.length ? themes : [{ id: "teacher_friendly", name: "Teacher Friendly", description: "" }]).map((theme) => (
-                    <option key={theme.id} value={theme.id}>
-                      {theme.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
             </div>
-            {themes.find((theme) => theme.id === selectedThemeId)?.description && (
-              <p className="mt-3 text-sm text-[var(--theme-text-muted)]">
-                {themes.find((theme) => theme.id === selectedThemeId)?.description}
-              </p>
-            )}
           </Card>
 
-          {exportResult && (
-            <Card title="Latest export" description="This file was written to the local exports folder.">
-              <dl className="grid gap-3 text-sm md:grid-cols-2">
-                <div>
-                  <dt className="font-semibold text-[var(--theme-text-muted)]">File</dt>
-                  <dd className="mt-1 break-words text-[var(--theme-text)]">{exportResult.filename}</dd>
-                </div>
-                <div>
-                  <dt className="font-semibold text-[var(--theme-text-muted)]">Size</dt>
-                  <dd className="mt-1 text-[var(--theme-text)]">{formatBytes(exportResult.size_bytes)}</dd>
-                </div>
-                <div className="md:col-span-2">
-                  <dt className="font-semibold text-[var(--theme-text-muted)]">Content hash</dt>
-                  <dd className="mt-1 break-all font-mono text-xs text-[var(--theme-text)]">{exportResult.content_hash}</dd>
-                </div>
-                <div className="md:col-span-2">
-                  <dt className="font-semibold text-[var(--theme-text-muted)]">Saved path</dt>
-                  <dd className="mt-1 break-all text-xs text-[var(--theme-text)]">{exportResult.absolute_path}</dd>
-                </div>
-              </dl>
-              <div className="mt-5 flex flex-wrap gap-2">
-                <Button disabled={opening} onClick={() => void handleOpenExport()}>
-                  {opening ? "Opening..." : "Open PDF"}
-                </Button>
-                <a
-                  className="inline-flex rounded-xl border border-[var(--theme-border)] bg-white px-4 py-2.5 text-sm font-semibold text-[var(--theme-primary)] transition hover:bg-[var(--theme-surface-muted)]"
-                  href={exportDownloadUrl(exportResult)}
-                  download={exportResult.filename}
+          <Card title="Template gallery" description="Templates change packet layout, not student data.">
+            <div className="grid gap-3 md:grid-cols-2">
+              {(packetTemplates.length ? packetTemplates : []).map((template) => (
+                <button
+                  key={template.id}
+                  className={`rounded-xl border p-4 text-left transition ${selectedTemplateId === template.id ? "border-[var(--theme-primary)] bg-[var(--theme-primary-soft)]" : "border-[var(--theme-border)] bg-white hover:bg-[var(--theme-surface-muted)]"}`}
+                  onClick={() => void saveThemeSettings({ templateId: template.id })}
                 >
-                  Download PDF
-                </a>
-              </div>
-            </Card>
-          )}
-
-          {allExportResults.length > 1 && (
-            <Card title="All packet exports" description="Each selected packet version was exported separately.">
-              <div className="space-y-3">
-                {allExportResults.map((result) => (
-                  <div key={result.id} className="rounded-xl border border-[var(--theme-border)] bg-white p-3 text-sm">
-                    <p className="font-semibold text-[var(--theme-text)]">{result.filename}</p>
-                    <p className="mt-1 break-all text-xs text-[var(--theme-text-muted)]">{result.absolute_path}</p>
-                    <a
-                      className="mt-2 inline-flex text-sm font-semibold text-[var(--theme-primary)]"
-                      href={exportDownloadUrl(result)}
-                      download={result.filename}
-                    >
-                      Download
-                    </a>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
+                  <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--theme-accent)]">{template.category}</span>
+                  <span className="mt-1 block font-semibold text-[var(--theme-text)]">{template.name}</span>
+                  <span className="mt-2 block text-xs leading-5 text-[var(--theme-text-muted)]">{template.description}</span>
+                  <span className="mt-3 block rounded-lg border border-[var(--theme-border)] bg-white p-3 text-xs text-[var(--theme-text-muted)]">
+                    Cover: {template.cover_style}<br />
+                    Best for: {template.best_for}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </Card>
 
           {backupResult && (
             <Card title="Latest backup" description="This JSON backup was written locally.">
@@ -301,25 +271,80 @@ export function ReviewExportPage({
         </div>
 
         <aside className="xl:sticky xl:top-6">
-          <Card title="Generate PDF" description="Uses WeasyPrint through FastAPI.">
+          <Card title="Export options" description="Choose how and where the packet is saved.">
+            <div className="space-y-4">
+              <label className="text-sm font-semibold text-[var(--theme-text)]">
+                Filename
+                <input
+                  className="mt-2 w-full rounded-xl border border-[var(--theme-border)] bg-white px-3.5 py-2.5 text-sm shadow-sm outline-none focus:border-[var(--theme-primary)] focus:ring-2 focus:ring-[var(--theme-primary-soft)]"
+                  placeholder={`${project.student?.name || "Student"} - ${project.school_year || "School Year"}`}
+                  value={exportSettings.filename_template}
+                  onChange={(event) => void saveExportOptions({ ...exportSettings, filename_template: event.target.value })}
+                />
+              </label>
+              <label className="text-sm font-semibold text-[var(--theme-text)]">
+                Export mode
+                <select
+                  className="mt-2 w-full rounded-xl border border-[var(--theme-border)] bg-white px-3.5 py-2.5 text-sm shadow-sm outline-none focus:border-[var(--theme-primary)] focus:ring-2 focus:ring-[var(--theme-primary-soft)]"
+                  value={exportSettings.export_mode}
+                  onChange={(event) => void saveExportOptions({ ...exportSettings, export_mode: event.target.value as ExportMode })}
+                >
+                  <option value="single_pdf">Single PDF</option>
+                  <option value="zip_archive">ZIP Archive of All</option>
+                </select>
+              </label>
+              <label className="text-sm font-semibold text-[var(--theme-text)]">
+                Save to
+                <input
+                  className="mt-2 w-full rounded-xl border border-[var(--theme-border)] bg-white px-3.5 py-2.5 text-sm shadow-sm outline-none focus:border-[var(--theme-primary)] focus:ring-2 focus:ring-[var(--theme-primary-soft)]"
+                  readOnly
+                  placeholder="Choose a folder..."
+                  value={exportSettings.last_export_location}
+                />
+              </label>
+              <Button className="w-full justify-center" variant="outline" onClick={() => void handleSelectFolder()}>
+                Save to...
+              </Button>
+            </div>
+          </Card>
+          <Card title="Generate PDF" description="Uses WeasyPrint through FastAPI." className="mt-5">
             <p className="text-sm leading-6 text-[var(--theme-text-muted)]">
               Export includes the cover page, At-a-Glance, placeholders for future accommodations and behavior plans, goal summary, service areas, and data collection pages.
             </p>
             <Button
               className="mt-5 w-full justify-center"
-              disabled={!validation.is_complete || exporting || exportingAll}
-              onClick={() => void handleExport()}
+              variant="outline"
+              disabled={!validation.is_complete || previewing || exporting}
+              onClick={() => void handlePreview()}
             >
-              {exporting ? "Generating..." : "Generate PDF"}
+              {previewing ? "Creating preview..." : "Create Preview"}
             </Button>
             <Button
               className="mt-2 w-full justify-center"
-              variant="outline"
-              disabled={!validation.is_complete || exporting || exportingAll}
-              onClick={() => void handleExportAll()}
+              disabled={!validation.is_complete || previewing || exporting}
+              onClick={() => void handleExport()}
             >
-              {exportingAll ? "Generating all..." : "Export All Versions"}
+              {exporting ? "Exporting..." : exportSettings.export_mode === "zip_archive" ? "Export ZIP" : "Export PDF"}
             </Button>
+            {previewUrl && (
+              <div className="mt-4 overflow-hidden rounded-xl border border-[var(--theme-border)] bg-white">
+                <iframe className="h-96 w-full" src={previewUrl} title="Packet PDF preview" />
+              </div>
+            )}
+            {exportResult && (
+              <div className="mt-5 flex flex-wrap gap-2">
+                <Button disabled={opening} onClick={() => void handleOpenExport()}>
+                  {opening ? "Opening..." : exportSettings.export_mode === "zip_archive" ? "Open ZIP" : "Open PDF"}
+                </Button>
+                <a
+                  className="inline-flex rounded-xl border border-[var(--theme-border)] bg-white px-4 py-2.5 text-sm font-semibold text-[var(--theme-primary)] transition hover:bg-[var(--theme-surface-muted)]"
+                  href={exportDownloadUrl(exportResult)}
+                  download={exportResult.filename}
+                >
+                  Download
+                </a>
+              </div>
+            )}
           </Card>
           <Card title="Backup project" description="Create a local JSON backup of the project data." className="mt-5">
             <p className="text-sm leading-6 text-[var(--theme-text-muted)]">

@@ -117,9 +117,9 @@ export function App() {
     [project],
   );
 
-  function markSprintFourExported() {
+  function markExported() {
     setNotice(
-      "Sprint 4 export generated successfully.",
+      "Packet export generated successfully.",
     );
   }
 
@@ -208,7 +208,7 @@ export function App() {
         project={project}
         onProjectUpdate={setProject}
         onBack={() => setScreen("packet_designer")}
-        onComplete={markSprintFourExported}
+        onComplete={markExported}
       />
     );
   }

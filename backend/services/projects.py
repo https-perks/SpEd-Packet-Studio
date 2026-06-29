@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import base64
+import binascii
 from copy import deepcopy
 from datetime import date, datetime, timezone
 import hashlib
 from html import escape
+from io import BytesIO
 import json
 import re
 from pathlib import Path
 from typing import Iterable
+from uuid import uuid4
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import HTTPException
 from sqlalchemy import or_, select
@@ -20,8 +25,18 @@ from backend.schemas.projects import (
     AtAGlanceDraft,
     AtAGlanceResponse,
     BackupResponse,
+    BrandKit,
+    BrandKitLibraryDraft,
+    BrandKitLibraryItem,
+    BrandKitLogoUpload,
+    BrandLogoUpload,
+    BulkProjectAction,
+    BulkProjectActionResponse,
     DataSheetResponse,
     DataSheetsDraft,
+    DuplicateOptions,
+    ExportSettings,
+    ExportSettingsSelection,
     ExportAllResponse,
     ExportRequest,
     ExportResponse,
@@ -30,6 +45,9 @@ from backend.schemas.projects import (
     ObservationChecklistDraft,
     PacketBuilderDraft,
     PacketPageDraft,
+    PacketTemplateLibraryDraft,
+    PacketTemplateLibraryItem,
+    PacketTemplateOption,
     PacketVersionResponse,
     PacketVersionConfig,
     AssetPlacementDraft,
@@ -39,6 +57,7 @@ from backend.schemas.projects import (
     StepValidation,
     StudentResponse,
     StudentSetupDraft,
+    ThemeCustomization,
     ThemeSelection,
     ThemeOption,
     ValidationIssue,
@@ -87,12 +106,14 @@ THEME_OPTIONS = [
     ThemeOption(
         id="teacher_friendly",
         name="Teacher Friendly",
-        description="Polished blue, teal, green, purple, and orange Version 1 packet theme.",
+        description="Polished blue, teal, green, purple, and orange packet theme.",
+        category="Professional",
     ),
     ThemeOption(
-        id="studio",
-        name="Studio Legacy",
-        description="Simple legacy packet theme.",
+        id="minimal",
+        name="Minimal",
+        description="High-readability theme with very light color for photocopy-friendly packets.",
+        category="Minimal",
     ),
 ]
 
@@ -122,7 +143,203 @@ THEME_TOKENS = {
         "border": "#bdd3ec",
         "text": "#12213a",
     },
+    "minimal": {
+        "primary": "#111827",
+        "accent": "#4b5563",
+        "blue": "#1f2937",
+        "blue_soft": "#f9fafb",
+        "teal": "#374151",
+        "green": "#374151",
+        "green_soft": "#f9fafb",
+        "purple": "#374151",
+        "purple_soft": "#f9fafb",
+        "orange": "#111827",
+        "orange_soft": "#f8fafc",
+        "soft": "#ffffff",
+        "border": "#d1d5db",
+        "text": "#111827",
+    },
+    "elementary": {
+        "primary": "#24577a",
+        "accent": "#35b7a9",
+        "blue": "#3182ce",
+        "blue_soft": "#ebf8ff",
+        "teal": "#35b7a9",
+        "green": "#74b84a",
+        "green_soft": "#f1faed",
+        "purple": "#8a6fd1",
+        "purple_soft": "#f5f1fb",
+        "orange": "#f08a24",
+        "orange_soft": "#fff5e8",
+        "soft": "#f7fbff",
+        "border": "#bad8f3",
+        "text": "#123247",
+    },
+    "modern": {
+        "primary": "#12385f",
+        "accent": "#18aeb5",
+        "blue": "#2563eb",
+        "blue_soft": "#eff6ff",
+        "teal": "#18aeb5",
+        "green": "#31a36b",
+        "green_soft": "#ecfdf5",
+        "purple": "#7c3aed",
+        "purple_soft": "#f5f3ff",
+        "orange": "#f97316",
+        "orange_soft": "#fff7ed",
+        "soft": "#f5f9fc",
+        "border": "#bfdbfe",
+        "text": "#102033",
+    },
+    "professional": {
+        "primary": "#1f3f5b",
+        "accent": "#64748b",
+        "blue": "#2f6690",
+        "blue_soft": "#eef4f8",
+        "teal": "#4f8a8b",
+        "green": "#47785f",
+        "green_soft": "#eef7f2",
+        "purple": "#625d8f",
+        "purple_soft": "#f3f2f8",
+        "orange": "#b7652b",
+        "orange_soft": "#fbf1e8",
+        "soft": "#f6f7f9",
+        "border": "#cbd5e1",
+        "text": "#17212b",
+    },
+    "rounded": {
+        "primary": "#284b63",
+        "accent": "#3cbbb1",
+        "blue": "#3b82c4",
+        "blue_soft": "#edf7ff",
+        "teal": "#3cbbb1",
+        "green": "#7bbf54",
+        "green_soft": "#f3faee",
+        "purple": "#9370db",
+        "purple_soft": "#f7f2ff",
+        "orange": "#ff8a3d",
+        "orange_soft": "#fff3ea",
+        "soft": "#f8fbfd",
+        "border": "#c7ddea",
+        "text": "#1b2c36",
+    },
+    "classic": {
+        "primary": "#17345f",
+        "accent": "#b7791f",
+        "blue": "#1e4f86",
+        "blue_soft": "#f0f5fb",
+        "teal": "#2f6f73",
+        "green": "#557a46",
+        "green_soft": "#f2f6ef",
+        "purple": "#63507f",
+        "purple_soft": "#f3f0f7",
+        "orange": "#b7791f",
+        "orange_soft": "#fbf4e7",
+        "soft": "#f8f6f0",
+        "border": "#d8c9a8",
+        "text": "#17253d",
+    },
+    "flat": {
+        "primary": "#22313f",
+        "accent": "#00a6a6",
+        "blue": "#2563eb",
+        "blue_soft": "#f1f5f9",
+        "teal": "#00a6a6",
+        "green": "#16a34a",
+        "green_soft": "#f1f5f9",
+        "purple": "#9333ea",
+        "purple_soft": "#f1f5f9",
+        "orange": "#ea580c",
+        "orange_soft": "#f1f5f9",
+        "soft": "#f1f5f9",
+        "border": "#94a3b8",
+        "text": "#0f172a",
+    },
 }
+
+PACKET_TEMPLATE_OPTIONS = [
+    PacketTemplateOption(
+        id="modern_professional",
+        name="Modern Professional",
+        description="Clean geometric cover, minimal accents, and strong readability.",
+        category="Secondary",
+        cover_style="Large title with simple service badges",
+        best_for="Middle and high school packets",
+        page_count_hint="Standard",
+    ),
+    PacketTemplateOption(
+        id="district_branding",
+        name="District Branding",
+        description="Adds school and district brand-kit text to the cover and footer.",
+        category="District",
+        cover_style="Logo-ready cover with prominent school identity",
+        best_for="District-standard packets",
+        page_count_hint="Standard",
+    ),
+    PacketTemplateOption(
+        id="mountain_illustrated",
+        name="Mountain Illustrated",
+        description="Layered mountain landscape, strong teal ribbon, and centered service badges.",
+        category="Illustrated",
+        cover_style="Light illustrated cover with mountain horizon",
+        best_for="Warm professional packets with visual personality",
+        page_count_hint="Standard",
+    ),
+    PacketTemplateOption(
+        id="elementary_pop",
+        name="Elementary Pop",
+        description="Bright playful type, soft confetti accents, and large approachable badges.",
+        category="Elementary",
+        cover_style="Colorful friendly cover with large service blocks",
+        best_for="Elementary teams and approachable staff packets",
+        page_count_hint="Expanded",
+    ),
+    PacketTemplateOption(
+        id="alpine_photo",
+        name="Alpine Photo",
+        description="Dark geometric frame with a high-contrast alpine-inspired image panel.",
+        category="Secondary",
+        cover_style="Dark angled cover with image-style panel",
+        best_for="Middle and high school packets with a bold cover",
+        page_count_hint="Standard",
+    ),
+    PacketTemplateOption(
+        id="botanical_frame",
+        name="Botanical Frame",
+        description="Elegant green frame, calm typography, and soft botanical accents.",
+        category="Classic",
+        cover_style="Centered serif cover with leafy border",
+        best_for="Polished parent and team copies",
+        page_count_hint="Standard",
+    ),
+    PacketTemplateOption(
+        id="chalkboard",
+        name="Chalkboard",
+        description="High-contrast chalkboard style with handwritten-inspired dividers.",
+        category="Creative",
+        cover_style="Dark chalkboard cover with sketched section marks",
+        best_for="Casual internal packets and teacher-facing copies",
+        page_count_hint="Standard",
+    ),
+    PacketTemplateOption(
+        id="soft_organic",
+        name="Soft Organic",
+        description="Cream background, rounded cards, warm neutrals, and subtle organic shapes.",
+        category="Friendly",
+        cover_style="Soft neutral cover with rounded service cards",
+        best_for="Elementary and team collaboration packets",
+        page_count_hint="Standard",
+    ),
+    PacketTemplateOption(
+        id="purple_dot",
+        name="Purple Dot",
+        description="Clean editorial layout with a dotted accent field and purple section system.",
+        category="Modern",
+        cover_style="White cover with purple dot field and footer band",
+        best_for="Speech, related services, and concise digital packets",
+        page_count_hint="Compact",
+    ),
+]
 
 
 def _project_query():
@@ -153,6 +370,20 @@ def derive_initials(name: str) -> str:
     return "".join(part[0].upper() for part in name.split() if part)[:4]
 
 
+def _case_manager_name(student: Student | None) -> str:
+    if student is None:
+        return ""
+    structured = " ".join(
+        part
+        for part in (
+            student.case_manager_first_name or "",
+            student.case_manager_last_name or "",
+        )
+        if part
+    ).strip()
+    return structured or (student.case_manager or "")
+
+
 def suggest_school_year(iep_end_date: date | None) -> str:
     if iep_end_date is None:
         return ""
@@ -165,9 +396,38 @@ def _slug(value: str) -> str:
     return value.lower() or "student-packet"
 
 
-def default_export_filename(student_name: str, school_year: str) -> str:
-    pieces = [student_name, school_year, "service-packet"]
-    return "-".join(_slug(piece) for piece in pieces if piece) + ".pdf"
+def default_export_filename(
+    student_name: str, school_year: str, packet_version_name: str = "Service Packet"
+) -> str:
+    return (
+        f"{student_name or 'Student'} - "
+        f"{packet_version_name or 'Packet'} - "
+        f"{school_year or 'School Year'}.pdf"
+    )
+
+
+def _safe_filename(value: str, extension: str) -> str:
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "-", value).strip(" .-")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    if not cleaned:
+        cleaned = "Student Packet"
+    if not cleaned.lower().endswith(extension.lower()):
+        cleaned = f"{Path(cleaned).stem}{extension}"
+    return cleaned
+
+
+def _unique_output_path(directory: Path, filename: str) -> Path:
+    candidate = directory / filename
+    if not candidate.exists():
+        return candidate
+    stem = candidate.stem
+    suffix = candidate.suffix
+    index = 2
+    while True:
+        next_candidate = directory / f"{stem} ({index}){suffix}"
+        if not next_candidate.exists():
+            return next_candidate
+        index += 1
 
 
 def _delivery_label(value: str | None) -> str:
@@ -185,12 +445,470 @@ def _touch(project: Project) -> None:
 
 
 def list_themes() -> list[ThemeOption]:
-    return THEME_OPTIONS
+    return [
+        option.model_copy(
+            update={"default_customization": _customization_from_tokens(option.id).model_dump()}
+        )
+        for option in THEME_OPTIONS
+    ]
+
+
+def _library_file(name: str) -> Path:
+    path = settings.data_dir / "library"
+    path.mkdir(parents=True, exist_ok=True)
+    return path / name
+
+
+def _read_library(name: str) -> dict[str, object]:
+    path = _library_file(name)
+    if not path.exists():
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _write_library(name: str, value: dict[str, object]) -> None:
+    _library_file(name).write_text(
+        json.dumps(value, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
+def _builtin_template_library_items() -> list[PacketTemplateLibraryItem]:
+    default_id = str(_read_library("templates.json").get("default_template_id") or "modern_professional")
+    return [
+        PacketTemplateLibraryItem(
+            **template.model_dump(),
+            base_template_id=template.id,
+            theme_id="teacher_friendly",
+            customization=_customization_from_tokens("teacher_friendly"),
+            is_builtin=True,
+            is_default=template.id == default_id,
+        )
+        for template in PACKET_TEMPLATE_OPTIONS
+    ]
+
+
+def _custom_template_library_items() -> list[PacketTemplateLibraryItem]:
+    library = _read_library("templates.json")
+    items = library.get("items")
+    default_id = str(library.get("default_template_id") or "modern_professional")
+    if not isinstance(items, list):
+        return []
+    output: list[PacketTemplateLibraryItem] = []
+    valid_base_ids = {template.id for template in PACKET_TEMPLATE_OPTIONS}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            parsed = PacketTemplateLibraryItem(**item)
+        except ValueError:
+            continue
+        if parsed.base_template_id not in valid_base_ids:
+            parsed.base_template_id = "modern_professional"
+        parsed.is_builtin = False
+        parsed.is_default = parsed.id == default_id
+        output.append(parsed)
+    return output
+
+
+def _save_custom_templates(items: list[PacketTemplateLibraryItem], default_id: str | None = None) -> None:
+    library = _read_library("templates.json")
+    current_default = str(library.get("default_template_id") or "modern_professional")
+    _write_library(
+        "templates.json",
+        {
+            "default_template_id": default_id or current_default,
+            "items": [
+                item.model_copy(update={"is_builtin": False, "is_default": False}).model_dump(mode="json")
+                for item in items
+            ],
+        },
+    )
+
+
+def list_template_library() -> list[PacketTemplateLibraryItem]:
+    items = _builtin_template_library_items() + _custom_template_library_items()
+    default_id = str(_read_library("templates.json").get("default_template_id") or "modern_professional")
+    return [item.model_copy(update={"is_default": item.id == default_id}) for item in items]
+
+
+def list_packet_templates() -> list[PacketTemplateOption]:
+    return [
+        PacketTemplateOption(
+            id=item.id,
+            name=item.name,
+            description=item.description,
+            category=item.category,
+            cover_style=item.cover_style,
+            best_for=item.best_for,
+            page_count_hint=item.page_count_hint,
+        )
+        for item in list_template_library()
+    ]
+
+
+def _template_library_item(template_id: str) -> PacketTemplateLibraryItem | None:
+    return next((item for item in list_template_library() if item.id == template_id), None)
+
+
+def _packet_template_base_id(template_id: str) -> str:
+    item = _template_library_item(template_id)
+    return item.base_template_id if item else template_id
+
+
+def _customization_for_template(template_id: str) -> ThemeCustomization | None:
+    item = _template_library_item(template_id)
+    if item and not item.is_builtin:
+        return item.customization
+    return None
+
+
+def create_template_library_item(draft: PacketTemplateLibraryDraft) -> PacketTemplateLibraryItem:
+    valid_base_ids = {template.id for template in PACKET_TEMPLATE_OPTIONS}
+    if draft.base_template_id not in valid_base_ids:
+        raise HTTPException(status_code=422, detail="Unknown base packet template.")
+    if draft.theme_id not in THEME_TOKENS:
+        raise HTTPException(status_code=422, detail="Unknown packet theme.")
+    base = next(template for template in PACKET_TEMPLATE_OPTIONS if template.id == draft.base_template_id)
+    item = PacketTemplateLibraryItem(
+        id=f"custom_{uuid4().hex[:12]}",
+        name=draft.name.strip() or "Custom Template",
+        description=draft.description.strip() or "Custom packet template.",
+        category=draft.category.strip() or "Custom",
+        cover_style=base.cover_style,
+        best_for=base.best_for,
+        page_count_hint=base.page_count_hint,
+        base_template_id=draft.base_template_id,
+        theme_id=draft.theme_id,
+        customization=draft.customization,
+        is_builtin=False,
+        is_default=False,
+    )
+    items = _custom_template_library_items()
+    items.append(item)
+    _save_custom_templates(items)
+    return item
+
+
+def update_template_library_item(template_id: str, draft: PacketTemplateLibraryDraft) -> PacketTemplateLibraryItem:
+    if any(template.id == template_id for template in PACKET_TEMPLATE_OPTIONS):
+        raise HTTPException(status_code=409, detail="Built-in templates cannot be edited. Duplicate it first.")
+    items = _custom_template_library_items()
+    index = next((position for position, item in enumerate(items) if item.id == template_id), None)
+    if index is None:
+        raise HTTPException(status_code=404, detail="Template not found.")
+    valid_base_ids = {template.id for template in PACKET_TEMPLATE_OPTIONS}
+    if draft.base_template_id not in valid_base_ids:
+        raise HTTPException(status_code=422, detail="Unknown base packet template.")
+    if draft.theme_id not in THEME_TOKENS:
+        raise HTTPException(status_code=422, detail="Unknown packet theme.")
+    base = next(template for template in PACKET_TEMPLATE_OPTIONS if template.id == draft.base_template_id)
+    updated = items[index].model_copy(
+        update={
+            "name": draft.name.strip() or "Custom Template",
+            "description": draft.description.strip() or "Custom packet template.",
+            "category": draft.category.strip() or "Custom",
+            "cover_style": base.cover_style,
+            "best_for": base.best_for,
+            "page_count_hint": base.page_count_hint,
+            "base_template_id": draft.base_template_id,
+            "theme_id": draft.theme_id,
+            "customization": draft.customization,
+        }
+    )
+    items[index] = updated
+    _save_custom_templates(items)
+    return updated
+
+
+def duplicate_template_library_item(template_id: str) -> PacketTemplateLibraryItem:
+    source = _template_library_item(template_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Template not found.")
+    item = source.model_copy(
+        update={
+            "id": f"custom_{uuid4().hex[:12]}",
+            "name": f"{source.name} Copy",
+            "is_builtin": False,
+            "is_default": False,
+        }
+    )
+    items = _custom_template_library_items()
+    items.append(item)
+    _save_custom_templates(items)
+    return item
+
+
+def delete_template_library_item(template_id: str) -> None:
+    if any(template.id == template_id for template in PACKET_TEMPLATE_OPTIONS):
+        raise HTTPException(status_code=409, detail="Built-in templates cannot be deleted.")
+    items = _custom_template_library_items()
+    remaining = [item for item in items if item.id != template_id]
+    if len(remaining) == len(items):
+        raise HTTPException(status_code=404, detail="Template not found.")
+    default_id = str(_read_library("templates.json").get("default_template_id") or "modern_professional")
+    _save_custom_templates(remaining, "modern_professional" if default_id == template_id else default_id)
+
+
+def set_default_template(template_id: str) -> list[PacketTemplateLibraryItem]:
+    if _template_library_item(template_id) is None:
+        raise HTTPException(status_code=404, detail="Template not found.")
+    _save_custom_templates(_custom_template_library_items(), template_id)
+    return list_template_library()
+
+
+def _custom_brand_kits() -> list[BrandKitLibraryItem]:
+    library = _read_library("brand-kits.json")
+    items = library.get("items")
+    default_id = str(library.get("default_brand_kit_id") or "personal")
+    if not isinstance(items, list):
+        return []
+    output: list[BrandKitLibraryItem] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            parsed = BrandKitLibraryItem(**item)
+        except ValueError:
+            continue
+        parsed.is_default = parsed.id == default_id
+        output.append(parsed)
+    return output
+
+
+def _save_brand_kits(items: list[BrandKitLibraryItem], default_id: str | None = None) -> None:
+    library = _read_library("brand-kits.json")
+    current_default = str(library.get("default_brand_kit_id") or "personal")
+    _write_library(
+        "brand-kits.json",
+        {
+            "default_brand_kit_id": default_id or current_default,
+            "items": [
+                item.model_copy(update={"is_default": False}).model_dump(mode="json")
+                for item in items
+            ],
+        },
+    )
+
+
+def list_brand_kits() -> list[BrandKitLibraryItem]:
+    default_id = str(_read_library("brand-kits.json").get("default_brand_kit_id") or "personal")
+    personal = BrandKitLibraryItem(
+        id="personal",
+        name="Personal Brand Kit",
+        is_default=default_id == "personal",
+    )
+    return [personal] + [
+        item.model_copy(update={"is_default": item.id == default_id})
+        for item in _custom_brand_kits()
+    ]
+
+
+def create_brand_kit(draft: BrandKitLibraryDraft) -> BrandKitLibraryItem:
+    item = BrandKitLibraryItem(
+        id=f"brand_{uuid4().hex[:12]}",
+        name=draft.name.strip() or "Brand Kit",
+        district_name=draft.district_name,
+        school_name=draft.school_name,
+        district_logo_label=draft.district_logo_label,
+        school_logo_label=draft.school_logo_label,
+        logo_relative_path=draft.logo_relative_path,
+        logo_filename=draft.logo_filename,
+        watermark_enabled=draft.watermark_enabled,
+        default_fonts=draft.default_fonts,
+        primary_color=draft.primary_color,
+        secondary_color=draft.secondary_color,
+        accent_color=draft.accent_color,
+        preferred_cover_style=draft.preferred_cover_style,
+        footer_text=draft.footer_text,
+        default_filename_template=draft.default_filename_template,
+        is_default=False,
+    )
+    items = _custom_brand_kits()
+    items.append(item)
+    _save_brand_kits(items)
+    return item
+
+
+def update_brand_kit(brand_kit_id: str, draft: BrandKitLibraryDraft) -> BrandKitLibraryItem:
+    if brand_kit_id == "personal":
+        raise HTTPException(status_code=409, detail="The personal default Brand Kit cannot be edited. Create a new kit first.")
+    items = _custom_brand_kits()
+    index = next((position for position, item in enumerate(items) if item.id == brand_kit_id), None)
+    if index is None:
+        raise HTTPException(status_code=404, detail="Brand Kit not found.")
+    current = items[index]
+    updated = current.model_copy(
+        update={
+            "name": draft.name.strip() or "Brand Kit",
+            "district_name": draft.district_name,
+            "school_name": draft.school_name,
+            "district_logo_label": draft.district_logo_label,
+            "school_logo_label": draft.school_logo_label,
+            "logo_relative_path": draft.logo_relative_path or current.logo_relative_path,
+            "logo_filename": draft.logo_filename or current.logo_filename,
+            "watermark_enabled": draft.watermark_enabled,
+            "default_fonts": draft.default_fonts,
+            "primary_color": draft.primary_color,
+            "secondary_color": draft.secondary_color,
+            "accent_color": draft.accent_color,
+            "preferred_cover_style": draft.preferred_cover_style,
+            "footer_text": draft.footer_text,
+            "default_filename_template": draft.default_filename_template,
+        }
+    )
+    items[index] = updated
+    _save_brand_kits(items)
+    return updated
+
+
+def duplicate_brand_kit(brand_kit_id: str) -> BrandKitLibraryItem:
+    source = next((item for item in list_brand_kits() if item.id == brand_kit_id), None)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Brand Kit not found.")
+    item = source.model_copy(
+        update={
+            "id": f"brand_{uuid4().hex[:12]}",
+            "name": f"{source.name} Copy",
+            "is_default": False,
+        }
+    )
+    items = _custom_brand_kits()
+    items.append(item)
+    _save_brand_kits(items)
+    return item
+
+
+def delete_brand_kit(brand_kit_id: str) -> None:
+    if brand_kit_id == "personal":
+        raise HTTPException(status_code=409, detail="The personal default Brand Kit cannot be deleted.")
+    items = _custom_brand_kits()
+    remaining = [item for item in items if item.id != brand_kit_id]
+    if len(remaining) == len(items):
+        raise HTTPException(status_code=404, detail="Brand Kit not found.")
+    default_id = str(_read_library("brand-kits.json").get("default_brand_kit_id") or "personal")
+    _save_brand_kits(remaining, "personal" if default_id == brand_kit_id else default_id)
+
+
+def set_default_brand_kit(brand_kit_id: str) -> list[BrandKitLibraryItem]:
+    if not any(item.id == brand_kit_id for item in list_brand_kits()):
+        raise HTTPException(status_code=404, detail="Brand Kit not found.")
+    _save_brand_kits(_custom_brand_kits(), brand_kit_id)
+    return list_brand_kits()
+
+
+def upload_brand_kit_logo(upload: BrandKitLogoUpload) -> BrandKitLibraryItem:
+    allowed_types = {
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/svg+xml": ".svg",
+    }
+    content_type = upload.content_type.lower().split(";")[0].strip()
+    if content_type not in allowed_types:
+        raise HTTPException(status_code=422, detail="Logo must be a PNG, JPG, or SVG file.")
+    try:
+        data = base64.b64decode(upload.data_base64, validate=True)
+    except (binascii.Error, ValueError) as reason:
+        raise HTTPException(status_code=422, detail="Logo data is not valid base64.") from reason
+    if not data:
+        raise HTTPException(status_code=422, detail="Logo file is empty.")
+    if len(data) > 1_500_000:
+        raise HTTPException(status_code=422, detail="Logo file must be 1.5 MB or smaller.")
+    if upload.brand_kit_id == "personal":
+        raise HTTPException(status_code=409, detail="Create a Brand Kit before uploading a logo.")
+
+    items = _custom_brand_kits()
+    index = next((position for position, item in enumerate(items) if item.id == upload.brand_kit_id), None)
+    if index is None:
+        raise HTTPException(status_code=404, detail="Brand Kit not found.")
+    extension = allowed_types[content_type]
+    logo_dir = settings.data_dir / "assets" / "brand-kits" / upload.brand_kit_id
+    logo_dir.mkdir(parents=True, exist_ok=True)
+    output_path = logo_dir / f"school-logo{extension}"
+    output_path.write_bytes(data)
+    updated = items[index].model_copy(
+        update={
+            "logo_relative_path": output_path.relative_to(settings.data_dir).as_posix(),
+            "logo_filename": upload.filename,
+        }
+    )
+    items[index] = updated
+    _save_brand_kits(items)
+    return updated
 
 
 def _theme_id(project: Project) -> str:
     value = (project.settings_json or {}).get("theme_id", "teacher_friendly")
     return value if value in THEME_TOKENS else "teacher_friendly"
+
+
+def _packet_template_id(project: Project) -> str:
+    valid_ids = {template.id for template in list_template_library()}
+    value = (project.settings_json or {}).get("packet_template_id", "modern_professional")
+    return value if value in valid_ids else "modern_professional"
+
+
+def _theme_customization(project: Project) -> ThemeCustomization:
+    value = (project.settings_json or {}).get("theme_customization")
+    if isinstance(value, dict):
+        return ThemeCustomization(**value)
+    tokens = THEME_TOKENS[_theme_id(project)]
+    return ThemeCustomization(
+        primary_color=str(tokens.get("primary", "#0f2d55")),
+        secondary_color=str(tokens.get("teal", tokens.get("accent", "#27b8b2"))),
+        accent_color=str(tokens.get("orange", tokens.get("accent", "#ef7900"))),
+        background_color=str(tokens.get("soft", "#f3f7fc")),
+        card_color="#ffffff",
+        text_color=str(tokens.get("text", "#12213a")),
+    )
+
+
+def _customization_from_tokens(theme_id: str) -> ThemeCustomization:
+    tokens = THEME_TOKENS[theme_id if theme_id in THEME_TOKENS else "teacher_friendly"]
+    return ThemeCustomization(
+        primary_color=tokens["primary"],
+        secondary_color=tokens["accent"],
+        accent_color=tokens.get("orange", tokens["accent"]),
+        background_color=tokens["soft"],
+        card_color="#ffffff",
+        text_color=tokens.get("text", "#12213a"),
+        service_area_colors={
+            "Reading": tokens.get("blue", tokens["primary"]),
+            "Written Expression": tokens.get("green", tokens["accent"]),
+            "Speech/Language": tokens.get("purple", tokens["primary"]),
+        },
+    )
+
+
+def _brand_kit(project: Project) -> BrandKit:
+    value = (project.settings_json or {}).get("brand_kit")
+    if isinstance(value, dict):
+        return BrandKit(**value)
+    student = project.student
+    return BrandKit(
+        school_name=student.school if student and student.school else "",
+        preferred_cover_style=_packet_template_id(project),
+    )
+
+
+def _export_settings(project: Project) -> ExportSettings:
+    value = (project.settings_json or {}).get("export_settings")
+    if isinstance(value, dict):
+        value = dict(value)
+        if value.get("export_mode") in {"multiple_pdfs", "combined_staff_packet"}:
+            value["export_mode"] = "zip_archive"
+        return ExportSettings(**value)
+    return ExportSettings()
+
+
+def _settings_with(project: Project, **values: object) -> dict[str, object]:
+    settings_json = deepcopy(project.settings_json or {})
+    settings_json.update(values)
+    return settings_json
 
 
 def _observation_checklist(project: Project) -> list[str]:
@@ -403,13 +1121,14 @@ def _summary(project: Project) -> ProjectSummary:
     student_setup = _student_setup_from_model(project)
     goals = [_goal_response(goal) for goal in project.goals if goal.deleted_at is None]
     glance = _at_a_glance_response(project.at_a_glance)
+    data_sheets = _data_sheet_responses(project)
     if not validate_student_setup(student_setup).is_complete:
         current_step = "student_setup"
     elif not validate_goals(goals).is_complete:
         current_step = "goals"
     elif not validate_at_a_glance(glance).is_complete:
         current_step = "at_a_glance"
-    elif not validate_data_sheets(_data_sheet_responses(project)).is_complete:
+    elif not validate_data_sheets(data_sheets).is_complete:
         current_step = "data_sheets"
     else:
         current_step = "complete"
@@ -421,6 +1140,14 @@ def _summary(project: Project) -> ProjectSummary:
         grade=project.student.grade if project.student and project.student.grade else "",
         updated_at=project.updated_at,
         archived=project.archived_at is not None,
+        case_manager=_case_manager_name(project.student),
+        service_areas=[
+            area.name
+            for area in sorted(project.service_areas, key=lambda item: item.position)
+            if area.deleted_at is None
+        ],
+        theme_id=_theme_id(project),
+        missing_data_sheets=not validate_data_sheets(data_sheets).is_complete,
         current_step=current_step,
     )
 
@@ -436,7 +1163,22 @@ def _student_setup_from_model(project: Project) -> StudentSetupDraft:
             "grade": student.grade if student and student.grade else "",
             "school": student.school if student and student.school else "",
             "case_manager": (
-                student.case_manager if student and student.case_manager else ""
+                _case_manager_name(student)
+            ),
+            "case_manager_first_name": (
+                student.case_manager_first_name if student and student.case_manager_first_name else ""
+            ),
+            "case_manager_last_name": (
+                student.case_manager_last_name if student and student.case_manager_last_name else ""
+            ),
+            "case_manager_phone": (
+                student.case_manager_phone if student and student.case_manager_phone else ""
+            ),
+            "case_manager_email": (
+                student.case_manager_email if student and student.case_manager_email else ""
+            ),
+            "case_manager_notes": (
+                student.case_manager_notes if student and student.case_manager_notes else ""
             ),
             "iep_end_date": student.iep_end_date if student else None,
         },
@@ -552,6 +1294,10 @@ def _detail(project: Project) -> ProjectDetail:
         packet_builder=_packet_builder_configs(project),
         observation_checklist=_observation_checklist(project),
         theme_id=_theme_id(project),
+        packet_template_id=_packet_template_id(project),
+        theme_customization=_theme_customization(project),
+        brand_kit=_brand_kit(project),
+        export_settings=_export_settings(project),
         goals=goals,
         at_a_glance=glance,
         data_sheets=data_sheets,
@@ -571,7 +1317,16 @@ def get_project(session: Session, project_id: str) -> Project:
 
 
 def list_projects(
-    session: Session, *, archived: bool = False, search: str = ""
+    session: Session,
+    *,
+    archived: bool = False,
+    search: str = "",
+    grade: str = "",
+    school_year: str = "",
+    case_manager: str = "",
+    service_area: str = "",
+    theme_id: str = "",
+    missing_data_sheets: bool = False,
 ) -> list[ProjectSummary]:
     query = _project_query()
     query = query.where(
@@ -581,17 +1336,44 @@ def list_projects(
         term = f"%{search.strip()}%"
         query = (
             query.join(Student, Student.project_id == Project.id, isouter=True)
+            .join(ServiceArea, ServiceArea.project_id == Project.id, isouter=True)
             .where(
                 or_(
                     Project.name.ilike(term),
                     Student.first_name.ilike(term),
                     Student.last_name.ilike(term),
+                    Student.initials.ilike(term),
+                    Student.grade.ilike(term),
+                    Student.school.ilike(term),
+                    Student.case_manager.ilike(term),
                     Project.school_year.ilike(term),
+                    ServiceArea.name.ilike(term),
                 )
             )
         )
     projects = session.scalars(query.order_by(Project.updated_at.desc())).unique()
-    return [_summary(project) for project in projects]
+    summaries = [_summary(project) for project in projects]
+    if grade.strip():
+        value = grade.strip().lower()
+        summaries = [project for project in summaries if value in project.grade.lower()]
+    if school_year.strip():
+        value = school_year.strip().lower()
+        summaries = [project for project in summaries if value in project.school_year.lower()]
+    if case_manager.strip():
+        value = case_manager.strip().lower()
+        summaries = [project for project in summaries if value in project.case_manager.lower()]
+    if service_area.strip():
+        value = service_area.strip().lower()
+        summaries = [
+            project
+            for project in summaries
+            if any(value in area.lower() for area in project.service_areas)
+        ]
+    if theme_id.strip():
+        summaries = [project for project in summaries if project.theme_id == theme_id.strip()]
+    if missing_data_sheets:
+        summaries = [project for project in summaries if project.missing_data_sheets]
+    return summaries
 
 
 def create_project(session: Session, name: str | None = None) -> ProjectDetail:
@@ -620,7 +1402,20 @@ def save_student_setup(
     student.initials = draft.student.initials.strip() or derive_initials(draft.student.name)
     student.grade = draft.student.grade.strip() or None
     student.school = draft.student.school.strip() or None
-    student.case_manager = draft.student.case_manager.strip() or None
+    student.case_manager_first_name = draft.student.case_manager_first_name.strip() or None
+    student.case_manager_last_name = draft.student.case_manager_last_name.strip() or None
+    student.case_manager_phone = draft.student.case_manager_phone.strip() or None
+    student.case_manager_email = draft.student.case_manager_email.strip() or None
+    student.case_manager_notes = draft.student.case_manager_notes.strip() or None
+    structured_case_manager = " ".join(
+        part
+        for part in (
+            draft.student.case_manager_first_name.strip(),
+            draft.student.case_manager_last_name.strip(),
+        )
+        if part
+    ).strip()
+    student.case_manager = structured_case_manager or draft.student.case_manager.strip() or None
     student.iep_end_date = draft.student.iep_end_date
 
     project.school_year = (
@@ -809,9 +1604,17 @@ def save_project_theme(
 ) -> ProjectDetail:
     if selection.theme_id not in THEME_TOKENS:
         raise HTTPException(status_code=422, detail="Unknown packet theme.")
+    valid_templates = {template.id for template in list_template_library()}
+    if selection.packet_template_id not in valid_templates:
+        raise HTTPException(status_code=422, detail="Unknown packet template.")
     project = get_project(session, project_id)
-    settings_json = deepcopy(project.settings_json or {})
-    settings_json["theme_id"] = selection.theme_id
+    settings_json = _settings_with(
+        project,
+        theme_id=selection.theme_id,
+        packet_template_id=selection.packet_template_id,
+        theme_customization=selection.customization.model_dump(),
+        brand_kit=selection.brand_kit.model_dump(),
+    )
     project.settings_json = settings_json
     _touch(project)
     session.commit()
@@ -819,21 +1622,196 @@ def save_project_theme(
     return _detail(get_project(session, project.id))
 
 
-def duplicate_project(session: Session, project_id: str) -> ProjectDetail:
+def upload_brand_logo(
+    session: Session, project_id: str, upload: BrandLogoUpload
+) -> ProjectDetail:
+    allowed_types = {
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/svg+xml": ".svg",
+    }
+    content_type = upload.content_type.lower().split(";")[0].strip()
+    if content_type not in allowed_types:
+        raise HTTPException(status_code=422, detail="Logo must be a PNG, JPG, or SVG file.")
+    try:
+        data = base64.b64decode(upload.data_base64, validate=True)
+    except (binascii.Error, ValueError) as reason:
+        raise HTTPException(status_code=422, detail="Logo data is not valid base64.") from reason
+    if not data:
+        raise HTTPException(status_code=422, detail="Logo file is empty.")
+    if len(data) > 1_500_000:
+        raise HTTPException(status_code=422, detail="Logo file must be 1.5 MB or smaller.")
+
+    project = get_project(session, project_id)
+    extension = allowed_types[content_type]
+    logo_dir = settings.data_dir / "assets" / project.id
+    logo_dir.mkdir(parents=True, exist_ok=True)
+    output_path = logo_dir / f"brand-logo{extension}"
+    output_path.write_bytes(data)
+
+    brand = _brand_kit(project)
+    brand.logo_relative_path = output_path.relative_to(settings.data_dir).as_posix()
+    brand.logo_filename = upload.filename
+    project.settings_json = _settings_with(project, brand_kit=brand.model_dump())
+    _touch(project)
+    session.commit()
+    session.expire_all()
+    return _detail(get_project(session, project.id))
+
+
+def save_export_settings(
+    session: Session, project_id: str, selection: ExportSettingsSelection
+) -> ProjectDetail:
+    project = get_project(session, project_id)
+    project.settings_json = _settings_with(
+        project,
+        export_settings=selection.export_settings.model_dump(),
+    )
+    _touch(project)
+    session.commit()
+    session.expire_all()
+    return _detail(get_project(session, project.id))
+
+
+def delete_project(session: Session, project_id: str) -> None:
+    project = get_project(session, project_id)
+    if project.archived_at is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Archive the project before permanently deleting it.",
+        )
+    session.delete(project)
+    session.commit()
+
+
+def apply_bulk_project_action(
+    session: Session, action: BulkProjectAction
+) -> BulkProjectActionResponse:
+    unique_ids = list(dict.fromkeys(action.project_ids))
+    duplicated: list[ProjectDetail] = []
+    exports: list[ExportResponse] = []
+    deleted_ids: list[str] = []
+    for project_id in unique_ids:
+        if action.action == "archive":
+            set_archived(session, project_id, True)
+        elif action.action == "restore":
+            set_archived(session, project_id, False)
+        elif action.action == "duplicate":
+            duplicated.append(duplicate_project(session, project_id, action.duplicate_options))
+        elif action.action == "assign_theme":
+            if not action.theme_id:
+                raise HTTPException(status_code=422, detail="Select a theme for bulk assignment.")
+            if action.theme_id not in THEME_TOKENS:
+                raise HTTPException(status_code=422, detail="Unknown packet theme.")
+            project = get_project(session, project_id)
+            project.settings_json = _settings_with(project, theme_id=action.theme_id)
+            _touch(project)
+            session.commit()
+            session.expire_all()
+        elif action.action == "update_template":
+            if not action.packet_template_id:
+                raise HTTPException(status_code=422, detail="Select a packet template.")
+            valid_templates = {template.id for template in list_template_library()}
+            if action.packet_template_id not in valid_templates:
+                raise HTTPException(status_code=422, detail="Unknown packet template.")
+            project = get_project(session, project_id)
+            project.settings_json = _settings_with(
+                project,
+                packet_template_id=action.packet_template_id,
+            )
+            _touch(project)
+            session.commit()
+            session.expire_all()
+        elif action.action == "update_school_year":
+            if action.school_year is None:
+                raise HTTPException(status_code=422, detail="Enter a school year.")
+            project = get_project(session, project_id)
+            project.school_year = action.school_year.strip()
+            _touch(project)
+            session.commit()
+            session.expire_all()
+        elif action.action == "assign_export_location":
+            if action.export_location is None:
+                raise HTTPException(status_code=422, detail="Enter an export location.")
+            project = get_project(session, project_id)
+            settings = _export_settings(project)
+            settings.last_export_location = action.export_location.strip()
+            project.settings_json = _settings_with(
+                project,
+                export_settings=settings.model_dump(),
+            )
+            _touch(project)
+            session.commit()
+            session.expire_all()
+        elif action.action == "export":
+            exports.extend(generate_all_pdf_exports(session, project_id).exports)
+        elif action.action == "delete":
+            delete_project(session, project_id)
+            deleted_ids.append(project_id)
+        elif action.action == "rename":
+            if len(unique_ids) != 1:
+                raise HTTPException(status_code=422, detail="Rename one project at a time.")
+            if action.project_name is None or not action.project_name.strip():
+                raise HTTPException(status_code=422, detail="Enter a project name.")
+            project = get_project(session, project_id)
+            project.name = action.project_name.strip()
+            _touch(project)
+            session.commit()
+            session.expire_all()
+    summaries = [
+        _summary(get_project(session, project_id))
+        for project_id in unique_ids
+        if action.action not in {"duplicate", "delete"}
+    ]
+    return BulkProjectActionResponse(
+        projects=summaries,
+        duplicated_projects=duplicated,
+        exports=exports,
+        deleted_project_ids=deleted_ids,
+    )
+
+
+def duplicate_project(
+    session: Session,
+    project_id: str,
+    options: DuplicateOptions | None = None,
+) -> ProjectDetail:
     source = get_project(session, project_id)
+    options = options or DuplicateOptions(
+        at_a_glance=True,
+        observation_notes=True,
+        data_sheets=True,
+    )
+    settings_json: dict[str, object] = {}
+    if options.theme:
+        source_settings = deepcopy(source.settings_json or {})
+        for key in ("theme_id", "theme_customization", "brand_kit"):
+            if key in source_settings:
+                settings_json[key] = source_settings[key]
+    if options.template:
+        source_settings = deepcopy(source.settings_json or {})
+        if "packet_template_id" in source_settings:
+            settings_json["packet_template_id"] = source_settings["packet_template_id"]
+    if options.observation_notes:
+        source_settings = deepcopy(source.settings_json or {})
+        if "observation_checklist" in source_settings:
+            settings_json["observation_checklist"] = source_settings["observation_checklist"]
+    source_export_settings = deepcopy(source.settings_json or {}).get("export_settings")
+    if isinstance(source_export_settings, dict):
+        settings_json["export_settings"] = source_export_settings
     duplicate = Project(
         name=f"{source.name} (Copy)",
         description=source.description,
-        school_year=source.school_year,
+        school_year=source.school_year if options.student_information else None,
         schema_version=settings.schema_version,
         app_version=settings.app_version,
-        default_export_filename=source.default_export_filename,
-        settings_json=deepcopy(source.settings_json),
+        default_export_filename=source.default_export_filename if options.student_information else None,
+        settings_json=settings_json,
     )
     session.add(duplicate)
     session.flush()
 
-    if source.student:
+    if options.student_information and source.student:
         duplicate.student = Student(
             first_name=source.student.first_name,
             last_name=source.student.last_name,
@@ -846,7 +1824,7 @@ def duplicate_project(session: Session, project_id: str) -> ProjectDetail:
         )
 
     area_map: dict[str, ServiceArea] = {}
-    for area in source.service_areas:
+    for area in (source.service_areas if options.service_areas else []):
         if area.deleted_at is not None:
             continue
         copied = ServiceArea(
@@ -861,7 +1839,7 @@ def duplicate_project(session: Session, project_id: str) -> ProjectDetail:
         area_map[area.id] = copied
     session.flush()
 
-    for goal in source.goals:
+    for goal in (source.goals if options.goals else []):
         if goal.deleted_at is not None or goal.service_area_id not in area_map:
             continue
         duplicate.goals.append(
@@ -876,7 +1854,7 @@ def duplicate_project(session: Session, project_id: str) -> ProjectDetail:
                 position=goal.position,
             )
         )
-    if source.at_a_glance:
+    if options.at_a_glance and source.at_a_glance:
         duplicate.at_a_glance = AtAGlance(
             sections_json=deepcopy(source.at_a_glance.sections_json)
         )
@@ -890,7 +1868,7 @@ def duplicate_project(session: Session, project_id: str) -> ProjectDetail:
             strict=False,
         )
     }
-    for sheet in source.data_sheets:
+    for sheet in (source.data_sheets if options.data_sheets else []):
         if sheet.deleted_at is not None:
             continue
         copied_sheet = DataSheet(
@@ -904,7 +1882,7 @@ def duplicate_project(session: Session, project_id: str) -> ProjectDetail:
             if goal.id in goal_map and goal.deleted_at is None
         ]
         duplicate.data_sheets.append(copied_sheet)
-    for version in source.packet_versions:
+    for version in (source.packet_versions if options.packet_layout else []):
         if version.deleted_at is None:
             duplicate.packet_versions.append(
                 PacketVersion(
@@ -1047,8 +2025,19 @@ def _ordered_packet_pages(
     return output
 
 
-def _packet_styles(theme_id: str) -> str:
-    tokens = THEME_TOKENS.get(theme_id, THEME_TOKENS["teacher_friendly"])
+def _packet_styles(theme_id: str, customization: ThemeCustomization | None = None) -> str:
+    tokens = dict(THEME_TOKENS.get(theme_id, THEME_TOKENS["teacher_friendly"]))
+    if customization is not None:
+        tokens.update(
+            {
+                "primary": customization.primary_color,
+                "accent": customization.secondary_color,
+                "orange": customization.accent_color,
+                "soft": customization.background_color,
+                "card": customization.card_color,
+                "text": customization.text_color,
+            }
+        )
     css = """
     @page {
       size: Letter;
@@ -1081,7 +2070,7 @@ def _packet_styles(theme_id: str) -> str:
     ul { margin: 0; padding-left: 16px; }
     li { margin: 0 0 4px; }
     .page {
-      background: #ffffff;
+      background: __CARD__;
       break-after: page;
       box-shadow: 0 3px 14px rgba(15, 45, 85, 0.16);
       min-height: 9.55in;
@@ -1127,8 +2116,8 @@ def _packet_styles(theme_id: str) -> str:
     .cover {
       align-items: stretch;
       background:
-        radial-gradient(circle at 75% 20%, rgba(39, 184, 178, 0.34), transparent 20%),
-        linear-gradient(135deg, #0f2d55 0%, #123d73 58%, #0a2243 100%);
+        radial-gradient(circle at 75% 20%, __TEAL__, transparent 20%),
+        linear-gradient(135deg, __PRIMARY__ 0%, __BLUE__ 58%, #0a2243 100%);
       color: white;
       display: flex;
       min-height: 9.55in;
@@ -1146,11 +2135,55 @@ def _packet_styles(theme_id: str) -> str:
       width: 100%;
     }
     .cover-card h1, .cover-card h2 { color: white; }
+    .cover-icon {
+      align-items: center;
+      background: rgba(255,255,255,0.14);
+      border: 2px solid rgba(255,255,255,0.24);
+      border-radius: 999px;
+      color: #64ddd8;
+      display: flex;
+      font-family: "Poppins", "Segoe UI", Arial, sans-serif;
+      font-size: 20px;
+      font-weight: 900;
+      height: 64px;
+      justify-content: center;
+      letter-spacing: 0.02em;
+      margin: 0 auto 18px;
+      width: 64px;
+    }
+    .brand-logo {
+      display: block;
+      height: 58px;
+      margin: 0 auto 18px;
+      object-fit: contain;
+      width: 90px;
+    }
+    .cover-logo {
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      padding: 0;
+    }
+    .cover-content,
+    .cover-bottom {
+      position: relative;
+      z-index: 2;
+    }
     .cover-kicker {
       color: #64ddd8;
       font-size: 13px;
       font-weight: 700;
       letter-spacing: 0.34em;
+      text-transform: uppercase;
+    }
+    .cover-school {
+      color: rgba(255,255,255,0.72);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      margin: -2px 0 12px;
+      min-height: 12px;
       text-transform: uppercase;
     }
     .cover-year {
@@ -1276,6 +2309,7 @@ def _packet_styles(theme_id: str) -> str:
       word-break: normal;
     }
     .section {
+      background: __CARD__;
       border: 1px solid __BORDER__;
       border-radius: 14px;
       margin-bottom: 11px;
@@ -1284,7 +2318,7 @@ def _packet_styles(theme_id: str) -> str:
       overflow-wrap: anywhere;
     }
     .soft-card {
-      background: __SOFT__;
+      background: __CARD__;
       border: 1px solid __BORDER__;
       border-radius: 14px;
       overflow: hidden;
@@ -1312,7 +2346,7 @@ def _packet_styles(theme_id: str) -> str:
     .mini-dot.green { background: __GREEN__; }
     .mini-dot.purple { background: __PURPLE__; }
     .goal-card {
-      background: #fbfdff;
+      background: __CARD__;
       border: 1px solid __BORDER__;
       border-radius: 8px;
       margin-bottom: 8px;
@@ -1415,6 +2449,785 @@ def _packet_styles(theme_id: str) -> str:
       vertical-align: -1px;
       width: 8px;
     }
+    body.template-elementary-friendly .cover {
+      background:
+        radial-gradient(circle at 86% 18%, rgba(255,255,255,0.28), transparent 24%),
+        linear-gradient(145deg, __TEAL__ 0%, __PRIMARY__ 68%, __PURPLE__ 100%);
+    }
+    body.template-elementary-friendly .cover-card {
+      padding: 48px;
+    }
+    body.template-elementary-friendly .cover-year,
+    body.template-elementary-friendly .badge,
+    body.template-elementary-friendly .chip-dot {
+      border-radius: 18px;
+    }
+    body.template-elementary-friendly .section,
+    body.template-elementary-friendly .soft-card,
+    body.template-elementary-friendly .goal-card,
+    body.template-elementary-friendly .staff-checklist {
+      border-radius: 18px;
+    }
+    body.template-elementary-friendly th {
+      font-size: 9px;
+    }
+    body.template-minimal {
+      color: #111827;
+      font-family: Arial, sans-serif;
+    }
+    body.template-minimal h1,
+    body.template-minimal h2,
+    body.template-minimal h3,
+    body.template-minimal h4 {
+      color: #111827;
+      font-family: Arial, sans-serif;
+      letter-spacing: 0;
+    }
+    body.template-minimal .cover {
+      background: #ffffff;
+      border: 2px solid #111827;
+      color: #111827;
+    }
+    body.template-minimal .cover-card h1,
+    body.template-minimal .cover-card h2,
+    body.template-minimal .cover-kicker,
+    body.template-minimal .cover-school,
+    body.template-minimal .cover-student,
+    body.template-minimal .meta-value {
+      color: #111827;
+    }
+    body.template-minimal .cover-year,
+    body.template-minimal .badge,
+    body.template-minimal .chip-dot {
+      background: #111827;
+      color: #ffffff;
+    }
+    body.template-minimal .service-chip {
+      color: #111827;
+    }
+    body.template-minimal .meta-box,
+    body.template-minimal .section,
+    body.template-minimal .soft-card,
+    body.template-minimal .goal-card,
+    body.template-minimal th,
+    body.template-minimal td {
+      background: #ffffff;
+      border-color: #111827;
+    }
+    body.template-minimal .meta-label {
+      color: #374151;
+    }
+    body.template-minimal .mountains {
+      display: none;
+    }
+    body.template-district-branding .cover {
+      background: linear-gradient(180deg, #ffffff 0%, #eef6fb 100%);
+      border-top: 18px solid __PRIMARY__;
+      color: __TEXT__;
+    }
+    body.template-district-branding .cover-card h1,
+    body.template-district-branding .cover-card h2,
+    body.template-district-branding .cover-student {
+      color: __PRIMARY__;
+    }
+    body.template-district-branding .cover-kicker,
+    body.template-district-branding .cover-school {
+      color: __ACCENT__;
+    }
+    body.template-district-branding .cover-year {
+      background: __PRIMARY__;
+    }
+    body.template-district-branding .service-chip,
+    body.template-district-branding .meta-value {
+      color: __TEXT__;
+    }
+    body.template-district-branding .meta-box {
+      background: #ffffff;
+      border-color: __BORDER__;
+    }
+    body.template-district-branding .meta-label {
+      color: #64748b;
+    }
+    body.template-district-branding .mountains {
+      opacity: 0.12;
+    }
+    body.template-contemporary .page-header {
+      background: __SOFT__;
+      border: 0;
+      border-left: 8px solid __ACCENT__;
+      border-radius: 14px;
+      padding: 12px;
+    }
+    body.template-contemporary .section,
+    body.template-contemporary .soft-card,
+    body.template-contemporary .goal-card {
+      box-shadow: 0 8px 20px rgba(15, 45, 85, 0.08);
+    }
+    body.template-contemporary th {
+      background: __PRIMARY__;
+      color: #ffffff;
+    }
+    body.template-mountain-illustrated .cover {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(239, 252, 252, 0.84) 50%, rgba(6, 92, 102, 0.88) 100%),
+        linear-gradient(145deg, #ffffff 0%, #d9f4f1 100%);
+      color: __TEXT__;
+    }
+    body.template-mountain-illustrated .cover-card h1,
+    body.template-mountain-illustrated .cover-card h2,
+    body.template-mountain-illustrated .cover-student {
+      color: __PRIMARY__;
+      text-align: center;
+    }
+    body.template-mountain-illustrated .cover-kicker,
+    body.template-mountain-illustrated .cover-school {
+      color: #0b7285;
+      text-align: center;
+    }
+    body.template-mountain-illustrated .cover-year {
+      background: linear-gradient(90deg, #0f766e, __TEAL__);
+      box-shadow: 0 4px 0 rgba(15, 45, 85, 0.12);
+      display: block;
+      margin-left: auto;
+      margin-right: auto;
+      max-width: 280px;
+      text-align: center;
+    }
+    body.template-mountain-illustrated .service-chip,
+    body.template-mountain-illustrated .meta-value {
+      color: __PRIMARY__;
+    }
+    body.template-mountain-illustrated .chip-dot {
+      background: __PRIMARY__;
+      color: #ffffff;
+    }
+    body.template-mountain-illustrated .cover-icon {
+      background: linear-gradient(135deg, #09345a, #13b7b4);
+      border-color: rgba(255,255,255,0.8);
+      color: #ffffff;
+    }
+    body.template-mountain-illustrated .meta-box {
+      background: rgba(255,255,255,0.78);
+      border-color: rgba(15, 45, 85, 0.2);
+    }
+    body.template-mountain-illustrated .meta-label {
+      color: #4b6b7b;
+    }
+    body.template-mountain-illustrated .mountains {
+      height: 180px;
+      opacity: 0.78;
+    }
+    body.template-mountain-illustrated .mountains:before {
+      border-left-width: 170px;
+      border-right-width: 170px;
+      border-bottom-width: 128px;
+      border-bottom-color: rgba(8, 93, 102, 0.78);
+      left: 20px;
+    }
+    body.template-mountain-illustrated .mountains:after {
+      border-left-width: 190px;
+      border-right-width: 190px;
+      border-bottom-width: 144px;
+      border-bottom-color: rgba(31, 111, 184, 0.35);
+      right: -10px;
+    }
+    body.template-elementary-pop .cover {
+      background:
+        radial-gradient(circle at 9% 9%, rgba(239,121,0,0.18), transparent 18%),
+        radial-gradient(circle at 88% 15%, rgba(39,184,178,0.18), transparent 17%),
+        radial-gradient(circle at 18% 82%, rgba(125,102,183,0.16), transparent 20%),
+        #fffaf1;
+      color: __TEXT__;
+    }
+    body.template-elementary-pop .cover-card h1 {
+      color: __PRIMARY__;
+      font-size: 42px;
+      letter-spacing: 0.02em;
+      text-align: center;
+    }
+    body.template-elementary-pop .cover-card h2,
+    body.template-elementary-pop .cover-student {
+      color: #3f7f7d;
+      text-align: center;
+    }
+    body.template-elementary-pop .cover-kicker,
+    body.template-elementary-pop .cover-school {
+      color: #3f7f7d;
+      text-align: center;
+    }
+    body.template-elementary-pop .cover-year,
+    body.template-elementary-pop .badge,
+    body.template-elementary-pop .chip-dot {
+      border-radius: 999px;
+    }
+    body.template-elementary-pop .cover-icon {
+      background: #db7347;
+      border-color: rgba(255,255,255,0.9);
+      color: #ffffff;
+      box-shadow: 0 8px 18px rgba(217, 115, 71, 0.22);
+    }
+    body.template-elementary-pop .service-chip,
+    body.template-elementary-pop .meta-value {
+      color: __TEXT__;
+    }
+    body.template-elementary-pop .chip-dot {
+      background: __ORANGE__;
+      color: #ffffff;
+    }
+    body.template-elementary-pop .meta-box,
+    body.template-elementary-pop .section,
+    body.template-elementary-pop .soft-card,
+    body.template-elementary-pop .goal-card {
+      border-radius: 18px;
+    }
+    body.template-elementary-pop .meta-box {
+      background: rgba(255,250,240,0.88);
+      border-color: rgba(214,155,45,0.32);
+    }
+    body.template-elementary-pop .meta-label {
+      color: #9a5b20;
+    }
+    body.template-elementary-pop .mountains {
+      opacity: 0.18;
+    }
+    body.template-alpine-photo .cover {
+      background:
+        linear-gradient(112deg, #071827 0%, #102a43 56%, transparent 57%),
+        linear-gradient(155deg, transparent 0 58%, rgba(255,255,255,0.1) 58% 62%, transparent 62%),
+        radial-gradient(circle at 83% 47%, rgba(255,255,255,0.54), transparent 16%),
+        linear-gradient(160deg, #1f6fb8 0%, #0d1f35 100%);
+      color: white;
+    }
+    body.template-alpine-photo .cover-card {
+      justify-content: center;
+      padding-right: 240px;
+    }
+    body.template-alpine-photo .cover-year {
+      background: #149fe3;
+      margin-left: 0;
+    }
+    body.template-alpine-photo .cover-details {
+      margin-left: 0;
+      text-align: left;
+      width: 420px;
+    }
+    body.template-alpine-photo .cover-student,
+    body.template-alpine-photo .cover-services {
+      justify-content: flex-start;
+      text-align: left;
+    }
+    body.template-alpine-photo .meta-grid {
+      margin-left: 0;
+    }
+    body.template-alpine-photo .mountains {
+      height: 220px;
+      left: auto;
+      opacity: 0.52;
+      width: 310px;
+    }
+    body.template-botanical-frame .cover {
+      background:
+        radial-gradient(circle at 6% 7%, rgba(85,122,70,0.18), transparent 16%),
+        radial-gradient(circle at 92% 87%, rgba(85,122,70,0.14), transparent 18%),
+        #fbfbf5;
+      border: 8px solid rgba(85,122,70,0.55);
+      color: #2f463c;
+    }
+    body.template-botanical-frame .cover-card h1,
+    body.template-botanical-frame .cover-card h2,
+    body.template-botanical-frame .cover-student {
+      color: #2f463c;
+      font-family: Georgia, "Times New Roman", serif;
+      text-align: center;
+    }
+    body.template-botanical-frame .cover-kicker,
+    body.template-botanical-frame .cover-school {
+      color: #557a46;
+      text-align: center;
+    }
+    body.template-botanical-frame .cover-year {
+      background: #557a46;
+      display: block;
+      margin-left: auto;
+      margin-right: auto;
+      max-width: 220px;
+      text-align: center;
+    }
+    body.template-botanical-frame .cover-icon {
+      background: #62786e;
+      border-color: rgba(255,255,255,0.9);
+      color: #ffffff;
+      box-shadow: 0 8px 18px rgba(63, 84, 76, 0.18);
+    }
+    body.template-botanical-frame .service-chip,
+    body.template-botanical-frame .meta-value {
+      color: #2f463c;
+    }
+    body.template-botanical-frame .chip-dot {
+      background: #557a46;
+      color: #ffffff;
+    }
+    body.template-botanical-frame .meta-box {
+      background: rgba(255,255,255,0.72);
+      border-color: rgba(85,122,70,0.35);
+    }
+    body.template-botanical-frame .meta-label {
+      color: #557a46;
+    }
+    body.template-botanical-frame .mountains {
+      display: none;
+    }
+    body.template-chalkboard {
+      background: #f7f7f3;
+      color: #172033;
+    }
+    body.template-chalkboard .cover {
+      background:
+        linear-gradient(135deg, rgba(255,255,255,0.06) 0 25%, transparent 25% 50%, rgba(255,255,255,0.04) 50% 75%, transparent 75%),
+        #1f2933;
+      border: 8px solid #475569;
+      color: #f8fafc;
+    }
+    body.template-chalkboard .cover-card h1,
+    body.template-chalkboard .cover-card h2,
+    body.template-chalkboard .cover-student,
+    body.template-chalkboard .cover-kicker,
+    body.template-chalkboard .cover-school {
+      color: #f8fafc;
+      text-align: center;
+    }
+    body.template-chalkboard .cover-year {
+      background: transparent;
+      border: 2px solid rgba(255,255,255,0.58);
+      display: block;
+      margin-left: auto;
+      margin-right: auto;
+      max-width: 220px;
+      text-align: center;
+    }
+    body.template-chalkboard .meta-box {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.32);
+    }
+    body.template-chalkboard .mountains {
+      opacity: 0.12;
+    }
+    body.template-soft-organic .cover {
+      background:
+        radial-gradient(circle at 87% 11%, rgba(204,168,119,0.28), transparent 20%),
+        radial-gradient(circle at 11% 88%, rgba(204,168,119,0.22), transparent 19%),
+        #fbf6ed;
+      color: #4a3f34;
+    }
+    body.template-soft-organic .cover-card h1,
+    body.template-soft-organic .cover-card h2,
+    body.template-soft-organic .cover-student {
+      color: #5f4d3e;
+      font-family: Georgia, "Times New Roman", serif;
+      text-align: center;
+    }
+    body.template-soft-organic .cover-kicker,
+    body.template-soft-organic .cover-school {
+      color: #7b9274;
+      text-align: center;
+    }
+    body.template-soft-organic .cover-year {
+      background: #9b7f5f;
+      border-radius: 3px;
+      display: block;
+      margin-left: auto;
+      margin-right: auto;
+      max-width: 220px;
+      text-align: center;
+    }
+    body.template-soft-organic .service-chip,
+    body.template-soft-organic .meta-value {
+      color: #4a3f34;
+    }
+    body.template-soft-organic .chip-dot {
+      background: #7b9274;
+      color: #ffffff;
+    }
+    body.template-soft-organic .meta-box,
+    body.template-soft-organic .section,
+    body.template-soft-organic .soft-card,
+    body.template-soft-organic .goal-card {
+      border-radius: 18px;
+    }
+    body.template-soft-organic .mountains {
+      display: none;
+    }
+    body.template-purple-dot .cover {
+      background:
+        radial-gradient(circle, rgba(126, 87, 194, 0.42) 0 2px, transparent 2px) right center / 18px 18px no-repeat,
+        linear-gradient(90deg, #ffffff 0%, #ffffff 64%, #f3e8ff 64%, #ffffff 100%);
+      color: #101827;
+    }
+    body.template-purple-dot .cover-card h1,
+    body.template-purple-dot .cover-card h2 {
+      color: #101827;
+      font-size: 36px;
+    }
+    body.template-purple-dot .cover-student {
+      color: #101827;
+      text-align: left;
+    }
+    body.template-purple-dot .cover-kicker,
+    body.template-purple-dot .cover-school {
+      color: #6d3fc0;
+    }
+    body.template-purple-dot .cover-year,
+    body.template-purple-dot .chip-dot,
+    body.template-purple-dot .page-header {
+      background: #6d3fc0;
+      color: #ffffff;
+    }
+    body.template-purple-dot .service-chip,
+    body.template-purple-dot .meta-value {
+      color: #101827;
+    }
+    body.template-purple-dot .meta-box {
+      background: #6d3fc0;
+      border: 0;
+    }
+    body.template-purple-dot .meta-label,
+    body.template-purple-dot .meta-value {
+      color: #ffffff;
+    }
+    body.template-purple-dot .mountains {
+      display: none;
+    }
+    body.template-modern-professional .cover {
+      background:
+        linear-gradient(132deg, #ffffff 0 56%, rgba(23,124,151,0.08) 56% 100%),
+        #ffffff;
+      color: __TEXT__;
+    }
+    body.template-modern-professional .cover:before {
+      border-left: 410px solid transparent;
+      border-bottom: 320px solid #0d2848;
+      bottom: 0;
+      content: "";
+      position: absolute;
+      right: 0;
+      z-index: 0;
+    }
+    body.template-modern-professional .cover:after {
+      border-left: 340px solid transparent;
+      border-bottom: 115px solid #0f8b8d;
+      bottom: 0;
+      content: "";
+      position: absolute;
+      right: -70px;
+      z-index: 0;
+    }
+    body.template-modern-professional .cover-card {
+      justify-content: space-between;
+      padding: 42px 48px 34px;
+    }
+    body.template-modern-professional .cover-icon {
+      background: #0f8b8d;
+      border: 0;
+      border-radius: 16px;
+      color: #ffffff;
+    }
+    body.template-modern-professional .cover-card h1,
+    body.template-modern-professional .cover-student {
+      color: #0d2848;
+      text-align: center;
+    }
+    body.template-modern-professional .cover-kicker,
+    body.template-modern-professional .cover-school {
+      color: #0f8b8d;
+      text-align: center;
+    }
+    body.template-modern-professional .cover-year {
+      background: #0f8b8d;
+      display: block;
+      margin-left: auto;
+      margin-right: auto;
+      max-width: 250px;
+      text-align: center;
+    }
+    body.template-modern-professional .cover-bottom,
+    body.template-modern-professional .cover-bottom .service-chip,
+    body.template-modern-professional .cover-bottom .meta-value,
+    body.template-modern-professional .cover-bottom .meta-label {
+      color: #ffffff;
+    }
+    body.template-modern-professional .chip-dot {
+      background: #0d2848;
+      border-radius: 16px;
+      color: #ffffff;
+    }
+    body.template-modern-professional .meta-box {
+      background: rgba(255,255,255,0.08);
+      border-color: rgba(255,255,255,0.28);
+    }
+    body.template-modern-professional .mountains {
+      display: none;
+    }
+    body.template-modern-professional .page:not(.cover) {
+      background:
+        linear-gradient(90deg, rgba(15,139,141,0.13) 0 0.14in, transparent 0.14in),
+        #ffffff;
+    }
+    body.template-modern-professional .page-header {
+      background: linear-gradient(90deg, rgba(15,139,141,0.12), transparent);
+      border-bottom-color: #0f8b8d;
+      padding: 10px 12px;
+    }
+    body.template-modern-professional .section,
+    body.template-modern-professional .soft-card,
+    body.template-modern-professional .goal-card {
+      border-left: 5px solid #0f8b8d;
+    }
+    body.template-district-branding .cover {
+      background: #ffffff;
+      border-bottom: 18px solid #d89a2b;
+      border-top: 18px solid #0d2848;
+      color: __TEXT__;
+    }
+    body.template-district-branding .cover:before {
+      color: rgba(13,40,72,0.14);
+      content: "DISTRICT BRANDING";
+      font-family: "Poppins", "Segoe UI", Arial, sans-serif;
+      font-size: 13px;
+      font-weight: 800;
+      left: -60px;
+      letter-spacing: 0.24em;
+      position: absolute;
+      text-transform: uppercase;
+      top: 180px;
+      transform: rotate(-90deg);
+      z-index: 0;
+    }
+    body.template-district-branding .cover:after {
+      background: linear-gradient(90deg, #0d2848, #154f85);
+      bottom: 0;
+      content: "";
+      height: 2.1in;
+      left: 0;
+      position: absolute;
+      right: 0;
+      z-index: 0;
+    }
+    body.template-district-branding .cover-card {
+      justify-content: space-between;
+      padding: 42px 48px 34px;
+    }
+    body.template-district-branding .cover-icon {
+      background: #0d2848;
+      border-color: #0d2848;
+      color: #ffffff;
+    }
+    body.template-district-branding .cover-card h1,
+    body.template-district-branding .cover-student {
+      color: #0d2848;
+      text-align: center;
+    }
+    body.template-district-branding .cover-kicker,
+    body.template-district-branding .cover-school {
+      color: #d89a2b;
+      text-align: center;
+    }
+    body.template-district-branding .cover-year {
+      background: #d89a2b;
+      display: block;
+      margin-left: auto;
+      margin-right: auto;
+      max-width: 250px;
+      text-align: center;
+    }
+    body.template-district-branding .cover-bottom,
+    body.template-district-branding .cover-bottom .service-chip,
+    body.template-district-branding .cover-bottom .meta-label,
+    body.template-district-branding .cover-bottom .meta-value {
+      color: #ffffff;
+    }
+    body.template-district-branding .chip-dot {
+      background: #1d6fb8;
+      color: #ffffff;
+    }
+    body.template-district-branding .meta-box {
+      background: rgba(255,255,255,0.08);
+      border-color: rgba(255,255,255,0.28);
+    }
+    body.template-district-branding .page:not(.cover) {
+      border-top: 10px solid #0d2848;
+    }
+    body.template-district-branding .page-header {
+      border-bottom-color: #d89a2b;
+    }
+    body.template-mountain-illustrated .page:not(.cover) {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.96), rgba(239,252,252,0.82)),
+        __CARD__;
+      border-bottom: 10px solid rgba(8, 125, 135, 0.28);
+    }
+    body.template-mountain-illustrated .page-header {
+      background: linear-gradient(90deg, rgba(8, 125, 135, 0.12), transparent);
+      border-bottom-color: #087d87;
+      border-radius: 14px 14px 0 0;
+      padding: 10px 12px;
+    }
+    body.template-mountain-illustrated .section,
+    body.template-mountain-illustrated .soft-card,
+    body.template-mountain-illustrated .goal-card {
+      background: rgba(255,255,255,0.88);
+      border-color: rgba(8, 125, 135, 0.28);
+      box-shadow: 0 5px 14px rgba(8, 73, 88, 0.08);
+    }
+    body.template-mountain-illustrated th {
+      background: #e1f4f6;
+      color: #073d58;
+    }
+    body.template-elementary-pop .page:not(.cover) {
+      background:
+        radial-gradient(circle at 94% 4%, rgba(239,121,0,0.09), transparent 14%),
+        radial-gradient(circle at 4% 96%, rgba(39,184,178,0.09), transparent 15%),
+        #fffdf8;
+    }
+    body.template-elementary-pop .page-header {
+      background: #fff7e8;
+      border: 1px solid rgba(214,155,45,0.28);
+      border-bottom: 4px solid __ORANGE__;
+      border-radius: 18px;
+      padding: 10px 12px;
+    }
+    body.template-elementary-pop .section,
+    body.template-elementary-pop .soft-card,
+    body.template-elementary-pop .goal-card,
+    body.template-elementary-pop .staff-checklist {
+      background: rgba(255,250,240,0.92);
+      border-color: rgba(214,155,45,0.3);
+      box-shadow: 0 5px 12px rgba(217,120,83,0.08);
+    }
+    body.template-elementary-pop th {
+      background: #fff0d8;
+      color: #275769;
+    }
+    body.template-alpine-photo .page:not(.cover) {
+      background:
+        linear-gradient(90deg, #071827 0 0.18in, transparent 0.18in),
+        #ffffff;
+    }
+    body.template-alpine-photo .page-header {
+      background: #0d1f35;
+      border: 0;
+      border-left: 7px solid #149fe3;
+      border-radius: 0 12px 12px 0;
+      color: #ffffff;
+      padding: 11px 13px;
+    }
+    body.template-alpine-photo .page-header h2,
+    body.template-alpine-photo .page-header .eyebrow {
+      color: #ffffff;
+    }
+    body.template-alpine-photo .section,
+    body.template-alpine-photo .soft-card,
+    body.template-alpine-photo .goal-card {
+      border-color: #b8d8ee;
+      border-left: 5px solid #149fe3;
+    }
+    body.template-alpine-photo th {
+      background: #0d1f35;
+      color: #ffffff;
+    }
+    body.template-botanical-frame .page:not(.cover) {
+      background:
+        radial-gradient(circle at 0 0, rgba(111,143,106,0.1), transparent 18%),
+        radial-gradient(circle at 100% 100%, rgba(111,143,106,0.08), transparent 18%),
+        #fbfaf5;
+      border: 1px solid rgba(111,143,106,0.3);
+    }
+    body.template-botanical-frame .page-header {
+      border: 1px solid rgba(111,143,106,0.35);
+      border-bottom: 4px solid #6f8f6a;
+      border-radius: 2px;
+      justify-content: center;
+      padding: 12px;
+      text-align: center;
+    }
+    body.template-botanical-frame .page-header h2,
+    body.template-botanical-frame h3 {
+      font-family: Georgia, "Times New Roman", serif;
+      letter-spacing: 0.04em;
+    }
+    body.template-botanical-frame .section,
+    body.template-botanical-frame .soft-card,
+    body.template-botanical-frame .goal-card {
+      background: rgba(255,255,255,0.75);
+      border-color: rgba(111,143,106,0.35);
+      border-radius: 2px;
+    }
+    body.template-botanical-frame th {
+      background: #edf4e9;
+      color: #3f544c;
+    }
+    body.template-chalkboard .page:not(.cover) {
+      background: #fbfbf7;
+      border: 4px solid #1f2933;
+    }
+    body.template-chalkboard .page-header {
+      background: #1f2933;
+      border: 0;
+      border-radius: 8px;
+      color: #f8fafc;
+      padding: 12px;
+    }
+    body.template-chalkboard .page-header h2,
+    body.template-chalkboard .page-header .eyebrow {
+      color: #f8fafc;
+    }
+    body.template-chalkboard .section,
+    body.template-chalkboard .soft-card,
+    body.template-chalkboard .goal-card {
+      border: 2px dashed #475569;
+      border-radius: 8px;
+      box-shadow: none;
+    }
+    body.template-chalkboard th {
+      background: #1f2933;
+      color: #f8fafc;
+    }
+    body.template-soft-organic .page:not(.cover) {
+      background:
+        radial-gradient(circle at 98% 8%, rgba(204,168,119,0.11), transparent 16%),
+        #fbf6ed;
+    }
+    body.template-soft-organic .page-header {
+      background: rgba(255,255,255,0.65);
+      border: 1px solid rgba(155,127,95,0.22);
+      border-bottom: 4px solid #9b7f5f;
+      border-radius: 22px;
+      padding: 12px 14px;
+    }
+    body.template-soft-organic .section,
+    body.template-soft-organic .soft-card,
+    body.template-soft-organic .goal-card {
+      background: rgba(255,255,255,0.72);
+      border-color: rgba(155,127,95,0.22);
+    }
+    body.template-soft-organic th {
+      background: #f1e4d0;
+      color: #5f4d3e;
+    }
+    body.template-purple-dot .page:not(.cover) {
+      background:
+        radial-gradient(circle, rgba(126, 87, 194, 0.16) 0 1.5px, transparent 1.5px) right top / 16px 16px,
+        #ffffff;
+    }
+    body.template-purple-dot .section,
+    body.template-purple-dot .soft-card,
+    body.template-purple-dot .goal-card {
+      border-left: 6px solid #6d3fc0;
+      border-radius: 0 12px 12px 0;
+    }
+    body.template-purple-dot th {
+      background: #6d3fc0;
+      color: #ffffff;
+    }
     """
     return (
         css.replace("__PRIMARY__", tokens["primary"])
@@ -1430,6 +3243,7 @@ def _packet_styles(theme_id: str) -> str:
         .replace("__TEXT__", tokens.get("text", "#12213a"))
         .replace("__BORDER__", tokens["border"])
         .replace("__SOFT__", tokens["soft"])
+        .replace("__CARD__", tokens.get("card", "#ffffff"))
     )
 
 
@@ -1485,12 +3299,43 @@ def _service_symbol(value: str) -> str:
     return "R"
 
 
+def _team_contacts_html(student: StudentResponse | None) -> str:
+    if student is None:
+        return """
+          <div class="soft-card" style="margin-top: 18px;">
+            <h3>Team Contacts</h3>
+            <p><strong>Case Manager:</strong> Not entered</p>
+          </div>
+        """
+    case_manager_name = student.case_manager or "Not entered"
+    rows = [
+        f"<p><strong>Case Manager:</strong> {escape(case_manager_name)}</p>",
+        f"<p><strong>School:</strong> {escape(student.school or 'Not entered')}</p>",
+    ]
+    if student.case_manager_phone:
+        rows.append(f"<p><strong>Phone:</strong> {escape(student.case_manager_phone)}</p>")
+    if student.case_manager_email:
+        rows.append(f"<p><strong>Email:</strong> {escape(student.case_manager_email)}</p>")
+    if student.case_manager_notes:
+        rows.append(
+            f"<p><strong>Notes:</strong> {escape(student.case_manager_notes).replace(chr(10), '<br>')}</p>"
+        )
+    return (
+        '<div class="soft-card" style="margin-top: 18px;">'
+        "<h3>Team Contacts</h3>"
+        + "".join(rows)
+        + "</div>"
+    )
+
+
 def _build_packet_html(
     detail: ProjectDetail,
     *,
     theme_id: str,
+    packet_template_id: str,
     packet_version_name: str,
     packet_config: PacketVersionConfig | None = None,
+    customization: ThemeCustomization | None = None,
 ) -> str:
     student = detail.student
     student_name = student.name if student else "Student"
@@ -1506,15 +3351,24 @@ def _build_packet_html(
         """
         for name in service_names[:4]
     )
+    identity_html = '<div class="cover-icon">SP</div>'
+    if detail.brand_kit.logo_relative_path:
+        logo_src = detail.brand_kit.logo_relative_path.replace("\\", "/")
+        identity_html = f'<img class="brand-logo cover-logo" src="{escape(logo_src)}" alt="">'
     rendered_pages["cover"] = (
         f"""
         <section class="page cover">
           <div class="cover-card">
-            <p class="cover-kicker">Special Education</p>
-            <h1>Service<br>Packet</h1>
-            <div class="cover-year">{escape(detail.school_year or "School Year")}</div>
-            <div class="cover-details">
+            <div class="cover-content">
+              {identity_html}
+              <p class="cover-kicker">Special Education</p>
+              <p class="cover-school">{escape(detail.brand_kit.school_name or (student.school if student and student.school else ""))}</p>
+              <h1>Service<br>Packet</h1>
+              <div class="cover-year">{escape(detail.school_year or "School Year")}</div>
               <p class="cover-student">{escape(student_name)}</p>
+            </div>
+            <div class="cover-bottom">
+              <div class="cover-details">
               <div class="cover-services">{cover_chips}</div>
               <table class="meta-grid" aria-label="Student packet details">
                 <tbody>
@@ -1531,6 +3385,7 @@ def _build_packet_html(
                   </tr>
                 </tbody>
               </table>
+              </div>
             </div>
             <div class="mountains"></div>
           </div>
@@ -1657,13 +3512,7 @@ def _build_packet_html(
                 for area in detail.service_areas
             ],
         )
-        + f"""
-          <div class="soft-card" style="margin-top: 18px;">
-            <h3>Team Contacts</h3>
-            <p><strong>Case Manager:</strong> {escape(student.case_manager if student and student.case_manager else "Not entered")}</p>
-            <p><strong>School:</strong> {escape(student.school if student and student.school else "Not entered")}</p>
-          </div>
-        """
+        + _team_contacts_html(student)
         + "</section>"
     )
 
@@ -1693,7 +3542,7 @@ def _build_packet_html(
     checklist_items = detail.observation_checklist or DEFAULT_OBSERVATION_CHECKLIST
     checklist_html = f"""
       <div class="staff-checklist" style="margin-top: 12px;">
-        <h3 style="color: #ef7900;">Things Staff Need To Tell {escape(student.case_manager if student and student.case_manager else "The Case Manager")}</h3>
+        <h3 style="color: #ef7900;">Things Staff Need To Tell {escape(student.case_manager_first_name if student and student.case_manager_first_name else "The Case Manager")}</h3>
         {_checklist_table(checklist_items)}
       </div>
     """
@@ -1734,18 +3583,57 @@ def _build_packet_html(
 
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
-        f"<title>{escape(detail.name)}</title><style>{_packet_styles(theme_id)}</style>"
-        "</head><body>"
+        f"<title>{escape(detail.name)}</title><style>{_packet_styles(theme_id, customization or detail.theme_customization)}</style>"
+        f"</head><body class=\"template-{escape(packet_template_id.replace('_', '-'))}\">"
         + "".join(_ordered_packet_pages(rendered_pages, packet_config))
         + "</body></html>"
     )
 
 
+def _render_export_filename(
+    custom_filename: str,
+    detail: ProjectDetail,
+    *,
+    packet_version_name: str,
+    extension: str = ".pdf",
+    include_packet_version_for_custom: bool = False,
+) -> str:
+    student_name = detail.student.name if detail.student else ""
+    rendered = custom_filename.strip()
+    if rendered:
+        stem = Path(rendered).stem if Path(rendered).suffix else rendered
+        if include_packet_version_for_custom:
+            stem = f"{stem} - {packet_version_name}"
+        return _safe_filename(stem, extension)
+    return _safe_filename(
+        default_export_filename(student_name, detail.school_year, packet_version_name),
+        extension,
+    )
+
+
+def _export_directory(detail: ProjectDetail, project_id: str) -> Path:
+    configured = detail.export_settings.last_export_location.strip()
+    if configured:
+        path = Path(configured).expanduser()
+        if path.exists() and path.is_dir():
+            return path
+    export_dir = settings.data_dir / "exports" / project_id
+    export_dir.mkdir(parents=True, exist_ok=True)
+    return export_dir
+
+
+def _export_path_for_response(export: Export) -> Path:
+    absolute = (export.metadata_json or {}).get("absolute_path")
+    if isinstance(absolute, str) and absolute:
+        return Path(absolute)
+    return settings.data_dir / export.relative_path
+
+
 def _export_response(export: Export, project_id: str) -> ExportResponse:
-    export_path = settings.data_dir / export.relative_path
+    export_path = _export_path_for_response(export)
     return ExportResponse(
         id=export.id,
-        filename=Path(export.relative_path).name,
+        filename=export_path.name,
         relative_path=export.relative_path,
         absolute_path=str(export_path.resolve()),
         generated_at=export.generated_at,
@@ -1755,14 +3643,7 @@ def _export_response(export: Export, project_id: str) -> ExportResponse:
     )
 
 
-def generate_pdf_export(
-    session: Session, project_id: str, request: ExportRequest | None = None
-) -> ExportResponse:
-    request = request or ExportRequest()
-    if request.theme_id not in THEME_TOKENS:
-        raise HTTPException(status_code=422, detail="Unknown packet theme.")
-    project = get_project(session, project_id)
-    detail = _detail(project)
+def _ensure_export_ready(detail: ProjectDetail) -> None:
     if not (
         detail.student_setup_validation.is_complete
         and detail.goals_validation.is_complete
@@ -1774,44 +3655,109 @@ def generate_pdf_export(
             detail="Complete all packet sections before exporting.",
         )
 
-    packet = _resolve_packet_version(project, session, request.packet_version_id)
+
+def _render_packet_pdf_bytes(
+    detail: ProjectDetail,
+    packet: PacketVersion,
+    *,
+    theme_id: str,
+    packet_template_id: str,
+) -> bytes:
+    base_template_id = _packet_template_base_id(packet_template_id)
     html = _build_packet_html(
         detail,
-        theme_id=request.theme_id,
+        theme_id=theme_id,
+        packet_template_id=base_template_id,
         packet_version_name=packet.name,
         packet_config=_packet_config(packet),
+        customization=_customization_for_template(packet_template_id),
     )
     try:
-        pdf_bytes = render_pdf(PdfRenderRequest(html=html, base_url=str(settings.data_dir)))
+        return render_pdf(PdfRenderRequest(html=html, base_url=str(settings.data_dir)))
     except RuntimeError as reason:
         raise HTTPException(status_code=503, detail=str(reason)) from reason
-    content_hash = hashlib.sha256(pdf_bytes).hexdigest()
-    filename = detail.default_export_filename or default_export_filename(
-        detail.student.name if detail.student else "", detail.school_year
+
+
+def preview_pdf(
+    session: Session, project_id: str, request: ExportRequest | None = None
+) -> bytes:
+    request = request or ExportRequest()
+    if request.theme_id not in THEME_TOKENS:
+        raise HTTPException(status_code=422, detail="Unknown packet theme.")
+    valid_templates = {template.id for template in list_template_library()}
+    if request.packet_template_id and request.packet_template_id not in valid_templates:
+        raise HTTPException(status_code=422, detail="Unknown packet template.")
+    project = get_project(session, project_id)
+    detail = _detail(project)
+    _ensure_export_ready(detail)
+    packet = _resolve_packet_version(project, session, request.packet_version_id)
+    return _render_packet_pdf_bytes(
+        detail,
+        packet,
+        theme_id=request.theme_id or detail.theme_id,
+        packet_template_id=request.packet_template_id or detail.packet_template_id,
     )
-    if not filename.lower().endswith(".pdf"):
-        filename = f"{filename}.pdf"
+
+
+def generate_pdf_export(
+    session: Session, project_id: str, request: ExportRequest | None = None
+) -> ExportResponse:
+    request = request or ExportRequest()
+    if request.export_mode == "zip_archive":
+        return generate_zip_export(session, project_id, request)
+    if request.theme_id not in THEME_TOKENS:
+        raise HTTPException(status_code=422, detail="Unknown packet theme.")
+    valid_templates = {template.id for template in list_template_library()}
+    if request.packet_template_id and request.packet_template_id not in valid_templates:
+        raise HTTPException(status_code=422, detail="Unknown packet template.")
+    project = get_project(session, project_id)
+    detail = _detail(project)
+    _ensure_export_ready(detail)
+
+    packet = _resolve_packet_version(project, session, request.packet_version_id)
+    theme_id = request.theme_id or detail.theme_id
+    packet_template_id = request.packet_template_id or detail.packet_template_id
+    pdf_bytes = _render_packet_pdf_bytes(
+        detail,
+        packet,
+        theme_id=theme_id,
+        packet_template_id=packet_template_id,
+    )
+    content_hash = hashlib.sha256(pdf_bytes).hexdigest()
     generated_at = datetime.now(timezone.utc)
-    output_stem = Path(filename).stem
-    output_suffix = Path(filename).suffix or ".pdf"
-    timestamp = generated_at.strftime("%Y%m%d-%H%M%S")
-    filename = f"{output_stem}-{timestamp}{output_suffix}"
-    export_dir = settings.data_dir / "exports" / project.id
+    filename = _render_export_filename(
+        request.filename_template
+        if request.filename_template is not None
+        else detail.export_settings.filename_template,
+        detail,
+        packet_version_name=packet.name,
+    )
+    export_dir = _export_directory(detail, project.id)
     export_dir.mkdir(parents=True, exist_ok=True)
-    output_path = export_dir / filename
+    output_path = _unique_output_path(export_dir, filename)
     output_path.write_bytes(pdf_bytes)
 
+    data_root = settings.data_dir.resolve()
+    relative_path = (
+        output_path.relative_to(data_root).as_posix()
+        if data_root in output_path.resolve().parents or output_path.resolve() == data_root
+        else output_path.name
+    )
     export = Export(
         packet_version_id=packet.id,
         format="pdf",
-        relative_path=output_path.relative_to(settings.data_dir).as_posix(),
+        relative_path=relative_path,
         content_hash=content_hash,
         generated_at=generated_at,
         metadata_json={
             "page_count_source": "deterministic_packet_builder",
             "schema_version": settings.schema_version,
-            "theme_id": request.theme_id,
+            "theme_id": theme_id,
+            "packet_template_id": packet_template_id,
             "packet_version_id": packet.id,
+            "export_mode": request.export_mode,
+            "filename_template": request.filename_template or detail.export_settings.filename_template,
+            "absolute_path": str(output_path.resolve()),
         },
     )
     session.add(export)
@@ -1822,6 +3768,88 @@ def generate_pdf_export(
     packet = _resolve_packet_version(refreshed, session, packet.id)
     latest = max(packet.exports, key=lambda item: item.generated_at)
     return _export_response(latest, project_id)
+
+
+def generate_zip_export(
+    session: Session, project_id: str, request: ExportRequest | None = None
+) -> ExportResponse:
+    request = request or ExportRequest(export_mode="zip_archive")
+    if request.theme_id not in THEME_TOKENS:
+        raise HTTPException(status_code=422, detail="Unknown packet theme.")
+    valid_templates = {template.id for template in list_template_library()}
+    if request.packet_template_id and request.packet_template_id not in valid_templates:
+        raise HTTPException(status_code=422, detail="Unknown packet template.")
+    project = get_project(session, project_id)
+    detail = _detail(project)
+    _ensure_export_ready(detail)
+    versions = [version for version in project.packet_versions if version.deleted_at is None]
+    if not versions:
+        versions = [_ensure_export_packet(project, session)]
+
+    theme_id = request.theme_id or detail.theme_id
+    packet_template_id = request.packet_template_id or detail.packet_template_id
+    custom_name = (
+        request.filename_template
+        if request.filename_template is not None
+        else detail.export_settings.filename_template
+    )
+    generated_at = datetime.now(timezone.utc)
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
+        for version in versions:
+            pdf_bytes = _render_packet_pdf_bytes(
+                detail,
+                version,
+                theme_id=theme_id,
+                packet_template_id=packet_template_id,
+            )
+            pdf_name = _render_export_filename(
+                custom_name,
+                detail,
+                packet_version_name=version.name,
+                include_packet_version_for_custom=bool(custom_name and custom_name.strip()),
+            )
+            archive.writestr(pdf_name, pdf_bytes)
+    zip_bytes = buffer.getvalue()
+    content_hash = hashlib.sha256(zip_bytes).hexdigest()
+    zip_filename = _render_export_filename(
+        custom_name,
+        detail,
+        packet_version_name="All Packet Versions",
+        extension=".zip",
+    )
+    export_dir = _export_directory(detail, project.id)
+    export_dir.mkdir(parents=True, exist_ok=True)
+    output_path = _unique_output_path(export_dir, zip_filename)
+    output_path.write_bytes(zip_bytes)
+    packet = versions[0]
+    data_root = settings.data_dir.resolve()
+    relative_path = (
+        output_path.relative_to(data_root).as_posix()
+        if data_root in output_path.resolve().parents or output_path.resolve() == data_root
+        else output_path.name
+    )
+    export = Export(
+        packet_version_id=packet.id,
+        format="zip",
+        relative_path=relative_path,
+        content_hash=content_hash,
+        generated_at=generated_at,
+        metadata_json={
+            "page_count_source": "deterministic_packet_builder",
+            "schema_version": settings.schema_version,
+            "theme_id": theme_id,
+            "packet_template_id": packet_template_id,
+            "export_mode": "zip_archive",
+            "filename_template": custom_name,
+            "absolute_path": str(output_path.resolve()),
+        },
+    )
+    session.add(export)
+    _touch(project)
+    session.commit()
+    session.expire_all()
+    return _export_response(export, project_id)
 
 
 def generate_all_pdf_exports(
@@ -1836,7 +3864,13 @@ def generate_all_pdf_exports(
         generate_pdf_export(
             session,
             project_id,
-            ExportRequest(packet_version_id=version.id, theme_id=request.theme_id),
+            ExportRequest(
+                packet_version_id=version.id,
+                theme_id=request.theme_id,
+                packet_template_id=request.packet_template_id,
+                filename_template=request.filename_template,
+                export_mode=request.export_mode,
+            ),
         )
         for version in versions
     ]
@@ -1853,10 +3887,7 @@ def get_export_path(session: Session, project_id: str, export_id: str) -> Path:
                 break
     if export is None:
         raise HTTPException(status_code=404, detail="Export not found.")
-    path = (settings.data_dir / export.relative_path).resolve()
-    data_root = settings.data_dir.resolve()
-    if data_root not in path.parents and path != data_root:
-        raise HTTPException(status_code=400, detail="Export path is invalid.")
+    path = _export_path_for_response(export).resolve()
     if not path.exists():
         raise HTTPException(status_code=404, detail="Export file not found.")
     return path

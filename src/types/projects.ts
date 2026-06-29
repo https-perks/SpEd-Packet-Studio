@@ -14,6 +14,18 @@ export type WorkflowStep =
   | "complete";
 export type DataSheetType = "trial_count" | "frequency" | "duration" | "rubric" | "notes";
 export type DataSheetColumnType = "text" | "number" | "date" | "checkbox" | "notes";
+export type BulkProjectActionKind =
+  | "archive"
+  | "restore"
+  | "duplicate"
+  | "assign_theme"
+  | "update_template"
+  | "update_school_year"
+  | "assign_export_location"
+  | "export"
+  | "delete"
+  | "rename";
+export type ExportMode = "single_pdf" | "zip_archive";
 
 export interface ValidationIssue {
   readonly field: string;
@@ -31,6 +43,11 @@ export interface StudentDraft {
   grade: string;
   school: string;
   case_manager: string;
+  case_manager_first_name: string;
+  case_manager_last_name: string;
+  case_manager_phone: string;
+  case_manager_email: string;
+  case_manager_notes: string;
   iep_end_date: string | null;
 }
 
@@ -141,6 +158,111 @@ export interface ThemeOption {
   readonly id: string;
   readonly name: string;
   readonly description: string;
+  readonly category: string;
+  readonly default_customization: Partial<ThemeCustomization>;
+}
+
+export interface PacketTemplateOption {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly category: string;
+  readonly cover_style: string;
+  readonly best_for: string;
+  readonly page_count_hint: string;
+}
+
+export interface PacketTemplateLibraryItem extends PacketTemplateOption {
+  base_template_id: string;
+  theme_id: string;
+  customization: ThemeCustomization;
+  is_builtin: boolean;
+  is_default: boolean;
+}
+
+export interface PacketTemplateLibraryDraft {
+  name: string;
+  description: string;
+  category: string;
+  base_template_id: string;
+  theme_id: string;
+  customization: ThemeCustomization;
+}
+
+export interface ThemeCustomization {
+  primary_color: string;
+  secondary_color: string;
+  accent_color: string;
+  background_color: string;
+  card_color: string;
+  text_color: string;
+  service_area_colors: Record<string, string>;
+}
+
+export interface BrandKit {
+  id: string;
+  name: string;
+  district_name: string;
+  school_name: string;
+  district_logo_label: string;
+  school_logo_label: string;
+  logo_relative_path: string;
+  logo_filename: string;
+  watermark_enabled: boolean;
+  default_fonts: string;
+  primary_color: string;
+  secondary_color: string;
+  accent_color: string;
+  preferred_cover_style: string;
+  footer_text: string;
+  default_filename_template: string;
+}
+
+export interface BrandKitLibraryItem extends BrandKit {
+  is_default: boolean;
+}
+
+export interface BrandKitLibraryDraft {
+  name: string;
+  district_name: string;
+  school_name: string;
+  district_logo_label: string;
+  school_logo_label: string;
+  logo_relative_path: string;
+  logo_filename: string;
+  watermark_enabled: boolean;
+  default_fonts: string;
+  primary_color: string;
+  secondary_color: string;
+  accent_color: string;
+  preferred_cover_style: string;
+  footer_text: string;
+  default_filename_template: string;
+}
+
+export interface ExportSettings {
+  filename_template: string;
+  last_export_location: string;
+  export_mode: ExportMode;
+}
+
+export interface DuplicateOptions {
+  student_information: boolean;
+  service_areas: boolean;
+  goals: boolean;
+  at_a_glance: boolean;
+  observation_notes: boolean;
+  data_sheets: boolean;
+  theme: boolean;
+  template: boolean;
+  packet_layout: boolean;
+}
+
+export interface BulkProjectActionResult {
+  readonly projects: readonly ProjectSummary[];
+  readonly duplicated_projects: readonly ProjectDetail[];
+  readonly exports: readonly ExportResult[];
+  readonly deleted_project_ids: readonly string[];
 }
 
 export interface BackupResult {
@@ -159,6 +281,10 @@ export interface ProjectSummary {
   readonly grade: string;
   readonly updated_at: string;
   readonly archived: boolean;
+  readonly case_manager: string;
+  readonly service_areas: readonly string[];
+  readonly theme_id: string;
+  readonly missing_data_sheets: boolean;
   readonly current_step: WorkflowStep;
 }
 
@@ -174,6 +300,10 @@ export interface ProjectDetail {
   readonly packet_builder: readonly PacketVersionConfig[];
   readonly observation_checklist: readonly string[];
   readonly theme_id: string;
+  readonly packet_template_id: string;
+  readonly theme_customization: ThemeCustomization;
+  readonly brand_kit: BrandKit;
+  readonly export_settings: ExportSettings;
   readonly goals: readonly (GoalDraft & { readonly id: string })[];
   readonly at_a_glance: {
     readonly id: string | null;

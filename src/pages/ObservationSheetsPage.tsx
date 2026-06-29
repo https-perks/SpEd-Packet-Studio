@@ -133,7 +133,7 @@ export function ObservationSheetsPage({
     <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
       <WorkflowHeader
         eyebrow="Step 5 of 7"
-        title="Observation Sheets"
+        title={`Observation Sheets${project.student?.name ? ` - ${project.student.name}` : ""}`}
         description="Create standalone observation forms and customize the staff-to-case-manager checklist."
         status={autosave.status}
         actions={<Button onClick={addObservation}>Add Observation Sheet</Button>}

@@ -5,11 +5,13 @@ from backend.database.session import engine
 from backend.database.migrations.versions.v0001_initial import upgrade as v0001_upgrade
 from backend.database.migrations.versions.v0002_sprint_one import upgrade as v0002_upgrade
 from backend.database.migrations.versions.v0003_goal_summary import upgrade as v0003_upgrade
+from backend.database.migrations.versions.v0004_case_manager_contact import upgrade as v0004_upgrade
 Migration = tuple[str, Callable[[Connection], None]]
 MIGRATIONS: tuple[Migration, ...] = (
     ("0001_initial", v0001_upgrade),
     ("0002_sprint_one", v0002_upgrade),
     ("0003_goal_summary", v0003_upgrade),
+    ("0004_case_manager_contact", v0004_upgrade),
 )
 
 def run_migrations() -> None:

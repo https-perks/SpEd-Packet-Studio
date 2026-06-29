@@ -22,7 +22,7 @@ function formatApiDetail(detail: unknown): string | null {
 export async function apiRequest<T>(
   path: string,
   options: {
-    method?: "GET" | "POST" | "PUT";
+    method?: "DELETE" | "GET" | "POST" | "PUT";
     body?: unknown;
     signal?: AbortSignal;
   } = {},
@@ -43,6 +43,7 @@ export async function apiRequest<T>(
       response.status,
     );
   }
+  if (response.status === 204) return undefined as T;
   return await response.json() as T;
 }
 

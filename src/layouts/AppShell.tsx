@@ -14,13 +14,13 @@ export function AppShell({
   hasProject,
   onNavigate,
 }: PropsWithChildren<AppShellProps>) {
-  return <div className="min-h-screen bg-[var(--theme-background)] lg:grid lg:grid-cols-[17rem_1fr]">
-    <aside className="border-b border-[var(--theme-border)] bg-[var(--theme-primary)] px-6 py-6 text-white lg:min-h-screen lg:border-r lg:border-b-0">
+  return <div className="min-h-screen bg-[var(--theme-background)] min-[1565px]:grid min-[1565px]:grid-cols-[17rem_1fr]">
+    <aside className="sticky top-0 z-40 border-b border-[var(--theme-border)] bg-[var(--theme-primary)] px-6 py-6 text-white min-[1565px]:static min-[1565px]:min-h-screen min-[1565px]:border-r min-[1565px]:border-b-0">
       <div className="flex items-center gap-3">
         <div aria-hidden="true" className="grid size-11 place-items-center rounded-2xl bg-white/12 text-xl font-semibold">S</div>
         <div><p className="text-sm font-semibold tracking-wide">SpEd Packet Studio</p><p className="text-xs text-white/60">Publishing, thoughtfully built</p></div>
       </div>
-      <nav aria-label="Primary navigation" className="mt-8"><ul className="flex gap-2 overflow-x-auto lg:flex-col">
+      <nav aria-label="Primary navigation" className="mt-8"><ul className="flex gap-2 overflow-x-auto min-[1565px]:flex-col">
         {navigationItems.map((item) => {
           const available = item.enabled && (!item.requiresProject || hasProject);
           const current = item.id === activeScreen;
@@ -31,7 +31,7 @@ export function AppShell({
         </button></li>;
         })}
       </ul></nav>
-      <p className="mt-8 hidden text-xs leading-5 text-white/50 lg:block">Enter educational information once. Publish it everywhere.</p>
+      <p className="mt-8 hidden text-xs leading-5 text-white/50 min-[1565px]:block">Enter educational information once. Publish it everywhere.</p>
     </aside>
     <main className="min-w-0">{children}</main>
   </div>;

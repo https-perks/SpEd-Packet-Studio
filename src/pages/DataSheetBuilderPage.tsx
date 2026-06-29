@@ -254,7 +254,7 @@ export function DataSheetBuilderPage({
     <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
       <WorkflowHeader
         eyebrow="Step 4 of 7"
-        title="Data Sheet Builder"
+        title={`Data Sheets${project.student?.name ? ` - ${project.student.name}` : ""}`}
         description="Create progress-monitoring sheet definitions from existing goals. Goal text stays owned by the Goal Builder."
         status={autosave.status}
         actions={<Button onClick={addDataSheet}>Add Data Sheet</Button>}

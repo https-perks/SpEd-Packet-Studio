@@ -38,7 +38,7 @@ class Student(IdentifierMixin, TimestampMixin, Base):
     first_name: Mapped[str | None] = mapped_column(String(100), index=True)
     last_name: Mapped[str | None] = mapped_column(String(100), index=True)
     initials: Mapped[str | None] = mapped_column(String(12))
-    grade: Mapped[str | None] = mapped_column(String(32)); school: Mapped[str | None] = mapped_column(String(200)); case_manager: Mapped[str | None] = mapped_column(String(200))
+    grade: Mapped[str | None] = mapped_column(String(32)); school: Mapped[str | None] = mapped_column(String(200)); case_manager: Mapped[str | None] = mapped_column(String(200)); case_manager_first_name: Mapped[str | None] = mapped_column(String(100)); case_manager_last_name: Mapped[str | None] = mapped_column(String(100)); case_manager_phone: Mapped[str | None] = mapped_column(String(80)); case_manager_email: Mapped[str | None] = mapped_column(String(200)); case_manager_notes: Mapped[str | None] = mapped_column(Text)
     iep_start_date: Mapped[date | None] = mapped_column(Date); iep_end_date: Mapped[date | None] = mapped_column(Date)
     project: Mapped[Project] = relationship(back_populates="student")
 

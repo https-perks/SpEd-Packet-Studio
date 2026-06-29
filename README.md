@@ -6,6 +6,42 @@ A local-first desktop publishing application for special education service packe
 
 Tauri desktop shell -> React and TypeScript presentation -> local FastAPI business layer -> SQLAlchemy ORM -> SQLite persistence -> WeasyPrint export engine.
 
+## Version 1.5 scope
+
+Version 1.5 begins the productivity and personalization expansion while keeping
+the Version 1 guided workflow intact. The focus is reducing repetitive work
+without turning the app into a freeform page editor.
+
+Included in the current 1.5 foundation:
+
+- Dashboard advanced filters for grade, school year, case manager, service area,
+  and projects missing data sheets
+- Multi-project selection with bulk archive, restore, duplicate, export, rename,
+  and delete actions
+- Dedicated archive cleanup through permanent delete after a project has already
+  been archived, including selected-project cleanup in Archive view
+- Duplicate wizard options for choosing which project sections carry forward
+- Template library preview for built-in packet templates
+- Additional built-in packet templates: Modern Professional, Elementary
+  Friendly, Minimal, District Branding, and Contemporary
+- Theme gallery metadata with Elementary Friendly and Minimal theme additions
+- Theme color customization for primary, secondary, accent, background, card,
+  text, and service-area colors in the packet rendering layer
+- Brand Kit fields and local logo upload support in the packet rendering layer
+- Export settings for plain custom filenames, export mode, and selected save
+  folder
+- Native Windows folder picker support for export destinations
+- ZIP archive export for all packet versions
+
+Still planned for later 1.5 passes:
+
+- Dashboard-level Brand Kit library management
+- Dashboard-level template editing and user-created templates
+- Template import/export and sharing
+- Full template create/rename/archive/delete management
+- Template thumbnails and larger template library management
+- Thumbnail caching and deeper performance work
+
 ## Version 1.0 scope
 
 Version 1.0 is feature-complete for producing local special education service
@@ -37,8 +73,8 @@ Included:
   checklist items
 - Packet Designer with per-version page visibility, page ordering, live preview,
   autosave, and theme application
-- Review & Export with full validation, selected-version export, export-all
-  packet versions, deterministic PDF export, and local JSON backup support
+- Review & Export with full validation, selected-version export, PDF preview,
+  deterministic PDF/ZIP export, and local JSON backup support
 - Local SQLite project storage and local PDF export storage
 
 Each goal stores both its complete IEP statement and a concise data-sheet summary.

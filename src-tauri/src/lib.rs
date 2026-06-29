@@ -32,10 +32,43 @@ fn open_path(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn select_folder() -> Result<Option<String>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let script = r#"
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = 'Choose where exported packets should be saved'
+$dialog.ShowNewFolderButton = $true
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::Out.Write($dialog.SelectedPath)
+}
+"#;
+        let output = std::process::Command::new("powershell")
+            .arg("-NoProfile")
+            .arg("-STA")
+            .arg("-Command")
+            .arg(script)
+            .output()
+            .map_err(|error| format!("Could not open the folder picker: {error}"))?;
+        if !output.status.success() {
+            return Err("The folder picker did not complete successfully.".to_string());
+        }
+        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Ok(if value.is_empty() { None } else { Some(value) });
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(None)
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![open_path])
+        .invoke_handler(tauri::generate_handler![open_path, select_folder])
         .run(tauri::generate_context!())
         .expect("error while running SpEd Packet Studio");
 }
