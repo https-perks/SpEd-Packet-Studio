@@ -51,13 +51,17 @@ from backend.schemas.projects import (
     PacketVersionResponse,
     PacketVersionConfig,
     AssetPlacementDraft,
+    AppSettings,
     ProjectDetail,
     ProjectSummary,
+    ServiceAreaDraft,
     ServiceAreaResponse,
+    DataSheetColumnDraft,
     StepValidation,
     StudentResponse,
     StudentSetupDraft,
     ThemeCustomization,
+    ThemePaletteDraft,
     ThemeSelection,
     ThemeOption,
     ValidationIssue,
@@ -102,6 +106,18 @@ DEFAULT_OBSERVATION_CHECKLIST = [
     "Other observations",
 ]
 
+DEFAULT_SERVICE_AREA_PRESETS = [
+    ServiceAreaDraft(name="Reading", position=0),
+    ServiceAreaDraft(name="Math", position=1),
+    ServiceAreaDraft(name="Written Expression", position=2),
+    ServiceAreaDraft(name="Social/Emotional/Behavioral", position=3),
+    ServiceAreaDraft(name="Self-Help/Independence", position=4),
+]
+
+DEFAULT_DATA_SHEET_COLUMN_DRAFTS = [
+    DataSheetColumnDraft(**column) for column in DEFAULT_DATA_SHEET_COLUMNS
+]
+
 THEME_OPTIONS = [
     ThemeOption(
         id="teacher_friendly",
@@ -114,6 +130,12 @@ THEME_OPTIONS = [
         name="Minimal",
         description="High-readability theme with very light color for photocopy-friendly packets.",
         category="Minimal",
+    ),
+    ThemeOption(
+        id="district_colors",
+        name="District Colors",
+        description="Custom district branding palette with editable primary, secondary, and accent colors.",
+        category="District",
     ),
 ]
 
@@ -158,6 +180,22 @@ THEME_TOKENS = {
         "soft": "#ffffff",
         "border": "#d1d5db",
         "text": "#111827",
+    },
+    "district_colors": {
+        "primary": "#0d2848",
+        "accent": "#154f85",
+        "blue": "#1d6fb8",
+        "blue_soft": "#eef4fb",
+        "teal": "#154f85",
+        "green": "#1d6fb8",
+        "green_soft": "#eef4fb",
+        "purple": "#154f85",
+        "purple_soft": "#eef4fb",
+        "orange": "#d89a2b",
+        "orange_soft": "#fff7e6",
+        "soft": "#ffffff",
+        "border": "#c9d6e4",
+        "text": "#14233c",
     },
     "elementary": {
         "primary": "#24577a",
@@ -445,12 +483,20 @@ def _touch(project: Project) -> None:
 
 
 def list_themes() -> list[ThemeOption]:
-    return [
-        option.model_copy(
-            update={"default_customization": _customization_from_tokens(option.id).model_dump()}
+    overrides = _theme_overrides()
+    deleted_builtin_ids = _deleted_builtin_theme_ids()
+    builtins = [
+        overrides.get(option.id)
+        or option.model_copy(
+            update={
+                "default_customization": _customization_from_tokens(option.id).model_dump(),
+                "is_builtin": True,
+            }
         )
         for option in THEME_OPTIONS
+        if option.id not in deleted_builtin_ids
     ]
+    return builtins + _custom_theme_options()
 
 
 def _library_file(name: str) -> Path:
@@ -477,19 +523,299 @@ def _write_library(name: str, value: dict[str, object]) -> None:
     )
 
 
+def _app_settings_default() -> AppSettings:
+    return AppSettings(
+        default_theme_id="teacher_friendly",
+        default_packet_template_id="modern_professional",
+        default_export_settings=ExportSettings(),
+        default_packet_pages=_default_packet_pages_from(DEFAULT_PACKET_PAGES),
+        default_observation_checklist=DEFAULT_OBSERVATION_CHECKLIST,
+        default_data_sheet_columns=DEFAULT_DATA_SHEET_COLUMN_DRAFTS,
+        service_area_presets=DEFAULT_SERVICE_AREA_PRESETS,
+    )
+
+
+def _default_packet_pages_from(pages: list[dict[str, str]]) -> list[PacketPageDraft]:
+    return [
+        PacketPageDraft(
+            id=str(page["id"]),
+            title=str(page["title"]),
+            page_type=str(page["page_type"]),
+            enabled=True,
+            position=position,
+        )
+        for position, page in enumerate(pages)
+    ]
+
+
+def get_app_settings() -> AppSettings:
+    raw = _read_library("app-settings.json")
+    defaults = _app_settings_default()
+    if not raw:
+        return defaults
+    try:
+        loaded = AppSettings(**raw)
+    except ValueError:
+        return defaults
+    if not loaded.default_packet_pages:
+        loaded.default_packet_pages = defaults.default_packet_pages
+    if not loaded.default_observation_checklist:
+        loaded.default_observation_checklist = defaults.default_observation_checklist
+    if not loaded.default_data_sheet_columns:
+        loaded.default_data_sheet_columns = defaults.default_data_sheet_columns
+    loaded.default_theme_id = _resolve_theme_id(loaded.default_theme_id)
+    if _template_library_item(loaded.default_packet_template_id) is None:
+        loaded.default_packet_template_id = "modern_professional"
+    return loaded
+
+
+def save_app_settings(value: AppSettings) -> AppSettings:
+    normalized = value.model_copy(deep=True)
+    normalized.default_theme_id = _resolve_theme_id(normalized.default_theme_id)
+    if _template_library_item(normalized.default_packet_template_id) is None:
+        normalized.default_packet_template_id = "modern_professional"
+    normalized.default_packet_pages = sorted(
+        normalized.default_packet_pages or _app_settings_default().default_packet_pages,
+        key=lambda page: page.position,
+    )
+    normalized.default_observation_checklist = [
+        item.strip() for item in normalized.default_observation_checklist if item.strip()
+    ] or DEFAULT_OBSERVATION_CHECKLIST
+    normalized.default_data_sheet_columns = sorted(
+        normalized.default_data_sheet_columns or DEFAULT_DATA_SHEET_COLUMN_DRAFTS,
+        key=lambda column: column.position,
+    )
+    normalized.service_area_presets = sorted(
+        normalized.service_area_presets,
+        key=lambda area: area.position,
+    )
+    _write_library("app-settings.json", normalized.model_dump(mode="json"))
+    return normalized
+
+
+def _builtin_theme_ids() -> set[str]:
+    return {option.id for option in THEME_OPTIONS}
+
+
+def _theme_exists(theme_id: str) -> bool:
+    return any(item.id == theme_id for item in list_themes())
+
+
+def _fallback_theme_id() -> str:
+    themes = list_themes()
+    if any(theme.id == "teacher_friendly" for theme in themes):
+        return "teacher_friendly"
+    return themes[0].id if themes else "minimal"
+
+
+def _resolve_theme_id(theme_id: str | None) -> str:
+    candidate = str(theme_id or "").strip()
+    return candidate if candidate and _theme_exists(candidate) else _fallback_theme_id()
+
+
+def _theme_library() -> dict[str, object]:
+    return _read_library("themes.json")
+
+
+def _theme_overrides() -> dict[str, ThemeOption]:
+    value = _theme_library().get("overrides")
+    if not isinstance(value, dict):
+        return {}
+    output: dict[str, ThemeOption] = {}
+    for theme_id, item in value.items():
+        if not isinstance(item, dict) or theme_id not in _builtin_theme_ids():
+            continue
+        try:
+            parsed = ThemeOption(**item)
+        except ValueError:
+            continue
+        parsed.id = theme_id
+        parsed.is_builtin = True
+        output[theme_id] = parsed
+    return output
+
+
+def _deleted_builtin_theme_ids() -> set[str]:
+    value = _theme_library().get("deleted_builtin_theme_ids")
+    if not isinstance(value, list):
+        return set()
+    return {str(item) for item in value if str(item) in _builtin_theme_ids() and str(item) != "minimal"}
+
+
+def _custom_theme_options() -> list[ThemeOption]:
+    library = _read_library("themes.json")
+    items = library.get("items")
+    if not isinstance(items, list):
+        return []
+    output: list[ThemeOption] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            parsed = ThemeOption(**item)
+        except ValueError:
+            continue
+        parsed.is_builtin = False
+        output.append(parsed)
+    return output
+
+
+def _save_custom_themes(items: list[ThemeOption]) -> None:
+    library = _theme_library()
+    _write_library(
+        "themes.json",
+        {
+            "deleted_builtin_theme_ids": list(library.get("deleted_builtin_theme_ids") or []),
+            "overrides": library.get("overrides") if isinstance(library.get("overrides"), dict) else {},
+            "items": [
+                item.model_copy(update={"is_builtin": False}).model_dump(mode="json")
+                for item in items
+            ],
+        },
+    )
+
+
+def _save_theme_library(
+    *,
+    items: list[ThemeOption] | None = None,
+    overrides: dict[str, ThemeOption] | None = None,
+    deleted_builtin_theme_ids: set[str] | None = None,
+) -> None:
+    library = _theme_library()
+    current_items = items if items is not None else _custom_theme_options()
+    current_overrides = overrides if overrides is not None else _theme_overrides()
+    current_deleted = deleted_builtin_theme_ids if deleted_builtin_theme_ids is not None else _deleted_builtin_theme_ids()
+    _write_library(
+        "themes.json",
+        {
+            "deleted_builtin_theme_ids": sorted(current_deleted),
+            "overrides": {
+                theme_id: item.model_copy(update={"id": theme_id, "is_builtin": True}).model_dump(mode="json")
+                for theme_id, item in current_overrides.items()
+            },
+            "items": [
+                item.model_copy(update={"is_builtin": False}).model_dump(mode="json")
+                for item in current_items
+            ],
+        },
+    )
+
+
+def create_theme_palette(draft: ThemePaletteDraft) -> ThemeOption:
+    item = ThemeOption(
+        id=f"palette_{uuid4().hex[:12]}",
+        name=draft.name.strip() or "Custom Palette",
+        description=draft.description.strip() or "Custom district color palette.",
+        category=draft.category.strip() or "Custom",
+        default_customization=draft.customization.model_dump(),
+        is_builtin=False,
+    )
+    items = _custom_theme_options()
+    items.append(item)
+    _save_custom_themes(items)
+    return item
+
+
+def update_theme_palette(theme_id: str, draft: ThemePaletteDraft) -> ThemeOption:
+    if theme_id in _builtin_theme_ids():
+        if theme_id in _deleted_builtin_theme_ids():
+            raise HTTPException(status_code=404, detail="Palette not found.")
+        base = next(option for option in THEME_OPTIONS if option.id == theme_id)
+        updated = base.model_copy(
+            update={
+                "name": draft.name.strip() or base.name,
+                "description": draft.description.strip() or base.description,
+                "category": draft.category.strip() or base.category,
+                "default_customization": draft.customization.model_dump(),
+                "is_builtin": True,
+            }
+        )
+        overrides = _theme_overrides()
+        overrides[theme_id] = updated
+        _save_theme_library(overrides=overrides)
+        return updated
+    items = _custom_theme_options()
+    index = next((position for position, item in enumerate(items) if item.id == theme_id), None)
+    if index is None:
+        raise HTTPException(status_code=404, detail="Palette not found.")
+    updated = items[index].model_copy(
+        update={
+            "name": draft.name.strip() or "Custom Palette",
+            "description": draft.description.strip() or "Custom district color palette.",
+            "category": draft.category.strip() or "Custom",
+            "default_customization": draft.customization.model_dump(),
+            "is_builtin": False,
+        }
+    )
+    items[index] = updated
+    _save_custom_themes(items)
+    return updated
+
+
+def delete_theme_palette(theme_id: str) -> None:
+    if theme_id == "minimal":
+        raise HTTPException(status_code=409, detail="The Minimal palette cannot be deleted.")
+    if theme_id in _builtin_theme_ids():
+        if theme_id in _deleted_builtin_theme_ids():
+            raise HTTPException(status_code=404, detail="Palette not found.")
+        deleted = _deleted_builtin_theme_ids()
+        deleted.add(theme_id)
+        overrides = _theme_overrides()
+        overrides.pop(theme_id, None)
+        _save_theme_library(overrides=overrides, deleted_builtin_theme_ids=deleted)
+        return
+    items = _custom_theme_options()
+    remaining = [item for item in items if item.id != theme_id]
+    if len(remaining) == len(items):
+        raise HTTPException(status_code=404, detail="Palette not found.")
+    _save_custom_themes(remaining)
+
+
 def _builtin_template_library_items() -> list[PacketTemplateLibraryItem]:
     default_id = str(_read_library("templates.json").get("default_template_id") or "modern_professional")
+    overrides = _template_overrides()
     return [
-        PacketTemplateLibraryItem(
-            **template.model_dump(),
-            base_template_id=template.id,
-            theme_id="teacher_friendly",
-            customization=_customization_from_tokens("teacher_friendly"),
-            is_builtin=True,
-            is_default=template.id == default_id,
+        (
+            overrides.get(template.id)
+            or PacketTemplateLibraryItem(
+                **template.model_dump(),
+                base_template_id=template.id,
+                theme_id="teacher_friendly",
+                customization=_customization_from_tokens("teacher_friendly"),
+                is_builtin=True,
+                is_default=template.id == default_id,
+            )
+        ).model_copy(
+            update={
+                "id": template.id,
+                "base_template_id": template.id,
+                "is_builtin": True,
+                "is_default": template.id == default_id,
+            }
         )
         for template in PACKET_TEMPLATE_OPTIONS
     ]
+
+
+def _template_overrides() -> dict[str, PacketTemplateLibraryItem]:
+    library = _read_library("templates.json")
+    value = library.get("overrides")
+    if not isinstance(value, dict):
+        return {}
+    valid_base_ids = {template.id for template in PACKET_TEMPLATE_OPTIONS}
+    output: dict[str, PacketTemplateLibraryItem] = {}
+    for template_id, item in value.items():
+        if not isinstance(item, dict) or template_id not in valid_base_ids:
+            continue
+        try:
+            parsed = PacketTemplateLibraryItem(**item)
+        except ValueError:
+            continue
+        parsed.id = template_id
+        parsed.base_template_id = template_id
+        parsed.is_builtin = True
+        output[template_id] = parsed
+    return output
 
 
 def _custom_template_library_items() -> list[PacketTemplateLibraryItem]:
@@ -522,6 +848,34 @@ def _save_custom_templates(items: list[PacketTemplateLibraryItem], default_id: s
         "templates.json",
         {
             "default_template_id": default_id or current_default,
+            "overrides": library.get("overrides") if isinstance(library.get("overrides"), dict) else {},
+            "items": [
+                item.model_copy(update={"is_builtin": False, "is_default": False}).model_dump(mode="json")
+                for item in items
+            ],
+        },
+    )
+
+
+def _save_template_overrides(overrides: dict[str, PacketTemplateLibraryItem]) -> None:
+    library = _read_library("templates.json")
+    items = _custom_template_library_items()
+    current_default = str(library.get("default_template_id") or "modern_professional")
+    _write_library(
+        "templates.json",
+        {
+            "default_template_id": current_default,
+            "overrides": {
+                template_id: item.model_copy(
+                    update={
+                        "id": template_id,
+                        "base_template_id": template_id,
+                        "is_builtin": True,
+                        "is_default": False,
+                    }
+                ).model_dump(mode="json")
+                for template_id, item in overrides.items()
+            },
             "items": [
                 item.model_copy(update={"is_builtin": False, "is_default": False}).model_dump(mode="json")
                 for item in items
@@ -562,7 +916,7 @@ def _packet_template_base_id(template_id: str) -> str:
 
 def _customization_for_template(template_id: str) -> ThemeCustomization | None:
     item = _template_library_item(template_id)
-    if item and not item.is_builtin:
+    if item and (not item.is_builtin or template_id in _template_overrides()):
         return item.customization
     return None
 
@@ -571,7 +925,7 @@ def create_template_library_item(draft: PacketTemplateLibraryDraft) -> PacketTem
     valid_base_ids = {template.id for template in PACKET_TEMPLATE_OPTIONS}
     if draft.base_template_id not in valid_base_ids:
         raise HTTPException(status_code=422, detail="Unknown base packet template.")
-    if draft.theme_id not in THEME_TOKENS:
+    if not _theme_exists(draft.theme_id):
         raise HTTPException(status_code=422, detail="Unknown packet theme.")
     base = next(template for template in PACKET_TEMPLATE_OPTIONS if template.id == draft.base_template_id)
     item = PacketTemplateLibraryItem(
@@ -595,18 +949,35 @@ def create_template_library_item(draft: PacketTemplateLibraryDraft) -> PacketTem
 
 
 def update_template_library_item(template_id: str, draft: PacketTemplateLibraryDraft) -> PacketTemplateLibraryItem:
+    valid_base_ids = {template.id for template in PACKET_TEMPLATE_OPTIONS}
+    if draft.base_template_id not in valid_base_ids:
+        raise HTTPException(status_code=422, detail="Unknown base packet template.")
+    if not _theme_exists(draft.theme_id):
+        raise HTTPException(status_code=422, detail="Unknown packet theme.")
+    base = next(template for template in PACKET_TEMPLATE_OPTIONS if template.id == draft.base_template_id)
     if any(template.id == template_id for template in PACKET_TEMPLATE_OPTIONS):
-        raise HTTPException(status_code=409, detail="Built-in templates cannot be edited. Duplicate it first.")
+        updated = PacketTemplateLibraryItem(
+            id=template_id,
+            name=draft.name.strip() or base.name,
+            description=draft.description.strip() or base.description,
+            category=draft.category.strip() or base.category,
+            cover_style=base.cover_style,
+            best_for=base.best_for,
+            page_count_hint=base.page_count_hint,
+            base_template_id=template_id,
+            theme_id=draft.theme_id,
+            customization=draft.customization,
+            is_builtin=True,
+            is_default=False,
+        )
+        overrides = _template_overrides()
+        overrides[template_id] = updated
+        _save_template_overrides(overrides)
+        return updated
     items = _custom_template_library_items()
     index = next((position for position, item in enumerate(items) if item.id == template_id), None)
     if index is None:
         raise HTTPException(status_code=404, detail="Template not found.")
-    valid_base_ids = {template.id for template in PACKET_TEMPLATE_OPTIONS}
-    if draft.base_template_id not in valid_base_ids:
-        raise HTTPException(status_code=422, detail="Unknown base packet template.")
-    if draft.theme_id not in THEME_TOKENS:
-        raise HTTPException(status_code=422, detail="Unknown packet theme.")
-    base = next(template for template in PACKET_TEMPLATE_OPTIONS if template.id == draft.base_template_id)
     updated = items[index].model_copy(
         update={
             "name": draft.name.strip() or "Custom Template",
@@ -664,7 +1035,7 @@ def set_default_template(template_id: str) -> list[PacketTemplateLibraryItem]:
 def _custom_brand_kits() -> list[BrandKitLibraryItem]:
     library = _read_library("brand-kits.json")
     items = library.get("items")
-    default_id = str(library.get("default_brand_kit_id") or "personal")
+    default_id = str(library.get("default_brand_kit_id") or "")
     if not isinstance(items, list):
         return []
     output: list[BrandKitLibraryItem] = []
@@ -682,11 +1053,12 @@ def _custom_brand_kits() -> list[BrandKitLibraryItem]:
 
 def _save_brand_kits(items: list[BrandKitLibraryItem], default_id: str | None = None) -> None:
     library = _read_library("brand-kits.json")
-    current_default = str(library.get("default_brand_kit_id") or "personal")
+    current_default = str(library.get("default_brand_kit_id") or "")
+    next_default = current_default if default_id is None else default_id
     _write_library(
         "brand-kits.json",
         {
-            "default_brand_kit_id": default_id or current_default,
+            "default_brand_kit_id": next_default,
             "items": [
                 item.model_copy(update={"is_default": False}).model_dump(mode="json")
                 for item in items
@@ -696,13 +1068,8 @@ def _save_brand_kits(items: list[BrandKitLibraryItem], default_id: str | None = 
 
 
 def list_brand_kits() -> list[BrandKitLibraryItem]:
-    default_id = str(_read_library("brand-kits.json").get("default_brand_kit_id") or "personal")
-    personal = BrandKitLibraryItem(
-        id="personal",
-        name="Personal Brand Kit",
-        is_default=default_id == "personal",
-    )
-    return [personal] + [
+    default_id = str(_read_library("brand-kits.json").get("default_brand_kit_id") or "")
+    return [
         item.model_copy(update={"is_default": item.id == default_id})
         for item in _custom_brand_kits()
     ]
@@ -718,6 +1085,8 @@ def create_brand_kit(draft: BrandKitLibraryDraft) -> BrandKitLibraryItem:
         school_logo_label=draft.school_logo_label,
         logo_relative_path=draft.logo_relative_path,
         logo_filename=draft.logo_filename,
+        watermark_logo_relative_path=draft.watermark_logo_relative_path,
+        watermark_logo_filename=draft.watermark_logo_filename,
         watermark_enabled=draft.watermark_enabled,
         default_fonts=draft.default_fonts,
         primary_color=draft.primary_color,
@@ -735,8 +1104,6 @@ def create_brand_kit(draft: BrandKitLibraryDraft) -> BrandKitLibraryItem:
 
 
 def update_brand_kit(brand_kit_id: str, draft: BrandKitLibraryDraft) -> BrandKitLibraryItem:
-    if brand_kit_id == "personal":
-        raise HTTPException(status_code=409, detail="The personal default Brand Kit cannot be edited. Create a new kit first.")
     items = _custom_brand_kits()
     index = next((position for position, item in enumerate(items) if item.id == brand_kit_id), None)
     if index is None:
@@ -751,6 +1118,8 @@ def update_brand_kit(brand_kit_id: str, draft: BrandKitLibraryDraft) -> BrandKit
             "school_logo_label": draft.school_logo_label,
             "logo_relative_path": draft.logo_relative_path or current.logo_relative_path,
             "logo_filename": draft.logo_filename or current.logo_filename,
+            "watermark_logo_relative_path": draft.watermark_logo_relative_path or current.watermark_logo_relative_path,
+            "watermark_logo_filename": draft.watermark_logo_filename or current.watermark_logo_filename,
             "watermark_enabled": draft.watermark_enabled,
             "default_fonts": draft.default_fonts,
             "primary_color": draft.primary_color,
@@ -784,14 +1153,12 @@ def duplicate_brand_kit(brand_kit_id: str) -> BrandKitLibraryItem:
 
 
 def delete_brand_kit(brand_kit_id: str) -> None:
-    if brand_kit_id == "personal":
-        raise HTTPException(status_code=409, detail="The personal default Brand Kit cannot be deleted.")
     items = _custom_brand_kits()
     remaining = [item for item in items if item.id != brand_kit_id]
     if len(remaining) == len(items):
         raise HTTPException(status_code=404, detail="Brand Kit not found.")
-    default_id = str(_read_library("brand-kits.json").get("default_brand_kit_id") or "personal")
-    _save_brand_kits(remaining, "personal" if default_id == brand_kit_id else default_id)
+    default_id = str(_read_library("brand-kits.json").get("default_brand_kit_id") or "")
+    _save_brand_kits(remaining, "" if default_id == brand_kit_id else default_id)
 
 
 def set_default_brand_kit(brand_kit_id: str) -> list[BrandKitLibraryItem]:
@@ -818,9 +1185,6 @@ def upload_brand_kit_logo(upload: BrandKitLogoUpload) -> BrandKitLibraryItem:
         raise HTTPException(status_code=422, detail="Logo file is empty.")
     if len(data) > 1_500_000:
         raise HTTPException(status_code=422, detail="Logo file must be 1.5 MB or smaller.")
-    if upload.brand_kit_id == "personal":
-        raise HTTPException(status_code=409, detail="Create a Brand Kit before uploading a logo.")
-
     items = _custom_brand_kits()
     index = next((position for position, item in enumerate(items) if item.id == upload.brand_kit_id), None)
     if index is None:
@@ -828,14 +1192,22 @@ def upload_brand_kit_logo(upload: BrandKitLogoUpload) -> BrandKitLibraryItem:
     extension = allowed_types[content_type]
     logo_dir = settings.data_dir / "assets" / "brand-kits" / upload.brand_kit_id
     logo_dir.mkdir(parents=True, exist_ok=True)
-    output_path = logo_dir / f"school-logo{extension}"
+    output_name = "watermark-logo" if upload.logo_kind == "watermark" else "cover-logo"
+    output_path = logo_dir / f"{output_name}{extension}"
     output_path.write_bytes(data)
-    updated = items[index].model_copy(
-        update={
+    update = (
+        {
+            "watermark_logo_relative_path": output_path.relative_to(settings.data_dir).as_posix(),
+            "watermark_logo_filename": upload.filename,
+            "watermark_enabled": True,
+        }
+        if upload.logo_kind == "watermark"
+        else {
             "logo_relative_path": output_path.relative_to(settings.data_dir).as_posix(),
             "logo_filename": upload.filename,
         }
     )
+    updated = items[index].model_copy(update=update)
     items[index] = updated
     _save_brand_kits(items)
     return updated
@@ -843,7 +1215,7 @@ def upload_brand_kit_logo(upload: BrandKitLogoUpload) -> BrandKitLibraryItem:
 
 def _theme_id(project: Project) -> str:
     value = (project.settings_json or {}).get("theme_id", "teacher_friendly")
-    return value if value in THEME_TOKENS else "teacher_friendly"
+    return _resolve_theme_id(str(value))
 
 
 def _packet_template_id(project: Project) -> str:
@@ -856,18 +1228,16 @@ def _theme_customization(project: Project) -> ThemeCustomization:
     value = (project.settings_json or {}).get("theme_customization")
     if isinstance(value, dict):
         return ThemeCustomization(**value)
-    tokens = THEME_TOKENS[_theme_id(project)]
-    return ThemeCustomization(
-        primary_color=str(tokens.get("primary", "#0f2d55")),
-        secondary_color=str(tokens.get("teal", tokens.get("accent", "#27b8b2"))),
-        accent_color=str(tokens.get("orange", tokens.get("accent", "#ef7900"))),
-        background_color=str(tokens.get("soft", "#f3f7fc")),
-        card_color="#ffffff",
-        text_color=str(tokens.get("text", "#12213a")),
-    )
+    return _customization_from_tokens(_theme_id(project))
 
 
 def _customization_from_tokens(theme_id: str) -> ThemeCustomization:
+    custom = next((item for item in _custom_theme_options() if item.id == theme_id), None)
+    if custom is not None:
+        return ThemeCustomization(**custom.default_customization)
+    override = _theme_overrides().get(theme_id)
+    if override is not None:
+        return ThemeCustomization(**override.default_customization)
     tokens = THEME_TOKENS[theme_id if theme_id in THEME_TOKENS else "teacher_friendly"]
     return ThemeCustomization(
         primary_color=tokens["primary"],
@@ -902,7 +1272,7 @@ def _export_settings(project: Project) -> ExportSettings:
         if value.get("export_mode") in {"multiple_pdfs", "combined_staff_packet"}:
             value["export_mode"] = "zip_archive"
         return ExportSettings(**value)
-    return ExportSettings()
+    return get_app_settings().default_export_settings
 
 
 def _settings_with(project: Project, **values: object) -> dict[str, object]:
@@ -914,9 +1284,9 @@ def _settings_with(project: Project, **values: object) -> dict[str, object]:
 def _observation_checklist(project: Project) -> list[str]:
     value = (project.settings_json or {}).get("observation_checklist")
     if not isinstance(value, list):
-        return DEFAULT_OBSERVATION_CHECKLIST
+        return get_app_settings().default_observation_checklist
     items = [str(item).strip() for item in value if str(item).strip()]
-    return items or DEFAULT_OBSERVATION_CHECKLIST
+    return items or get_app_settings().default_observation_checklist
 
 
 def _packet_version_responses(project: Project) -> list[PacketVersionResponse]:
@@ -928,16 +1298,7 @@ def _packet_version_responses(project: Project) -> list[PacketVersionResponse]:
 
 
 def _default_packet_pages() -> list[PacketPageDraft]:
-    return [
-        PacketPageDraft(
-            id=str(page["id"]),
-            title=str(page["title"]),
-            page_type=str(page["page_type"]),
-            enabled=True,
-            position=position,
-        )
-        for position, page in enumerate(DEFAULT_PACKET_PAGES)
-    ]
+    return get_app_settings().default_packet_pages
 
 
 def _packet_config(version: PacketVersion) -> PacketVersionConfig:
@@ -979,6 +1340,16 @@ def _packet_config(version: PacketVersion) -> PacketVersionConfig:
         pages=pages,
         asset_placements=sorted(assets, key=lambda item: item.position),
     )
+
+
+def _new_packet_version_settings() -> dict[str, object]:
+    return {
+        "pages": [
+            page.model_dump(mode="json")
+            for page in get_app_settings().default_packet_pages
+        ],
+        "asset_placements": [],
+    }
 
 
 def _packet_builder_configs(project: Project) -> list[PacketVersionConfig]:
@@ -1241,7 +1612,13 @@ def _data_sheet_response(sheet: DataSheet) -> DataSheetResponse:
         collection_schedule=str(configuration.get("collection_schedule") or ""),
         blank_instance_count=max(1, int(configuration.get("blank_instance_count") or 1)),
         columns=sorted(
-            deepcopy(configuration.get("columns") or DEFAULT_DATA_SHEET_COLUMNS),
+            deepcopy(
+                configuration.get("columns")
+                or [
+                    column.model_dump()
+                    for column in get_app_settings().default_data_sheet_columns
+                ]
+            ),
             key=lambda column: column.get("position", 0),
         ),
         notes=str(configuration.get("notes") or ""),
@@ -1377,13 +1754,52 @@ def list_projects(
 
 
 def create_project(session: Session, name: str | None = None) -> ProjectDetail:
+    app_defaults = get_app_settings()
+    case_manager = app_defaults.case_manager_profile
+    settings_json = {
+        "theme_id": app_defaults.default_theme_id,
+        "packet_template_id": app_defaults.default_packet_template_id,
+        "observation_checklist": app_defaults.default_observation_checklist,
+        "export_settings": app_defaults.default_export_settings.model_dump(mode="json"),
+    }
     project = Project(
         name=name.strip() if name and name.strip() else "Untitled Student Project",
+        school_year=app_defaults.default_school_year or None,
         schema_version=settings.schema_version,
         app_version=settings.app_version,
-        settings_json={},
+        settings_json=settings_json,
     )
     session.add(project)
+    session.flush()
+    if any(
+        value.strip()
+        for value in (
+            case_manager.first_name,
+            case_manager.last_name,
+            case_manager.phone,
+            case_manager.email,
+            case_manager.school,
+            case_manager.notes,
+        )
+    ):
+        project.student = Student(
+            project_id=project.id,
+            school=case_manager.school.strip() or None,
+            case_manager_first_name=case_manager.first_name.strip() or None,
+            case_manager_last_name=case_manager.last_name.strip() or None,
+            case_manager_phone=case_manager.phone.strip() or None,
+            case_manager_email=case_manager.email.strip() or None,
+            case_manager_notes=case_manager.notes.strip() or None,
+            case_manager=" ".join(
+                part
+                for part in (
+                    case_manager.first_name.strip(),
+                    case_manager.last_name.strip(),
+                )
+                if part
+            ).strip()
+            or None,
+        )
     session.commit()
     session.expire_all()
     return _detail(get_project(session, project.id))
@@ -1476,7 +1892,7 @@ def save_student_setup(
                     project_id=project.id,
                     name=AUDIENCE_LABELS[audience],
                     audience=audience,
-                    settings_json={},
+                    settings_json=_new_packet_version_settings(),
                 )
             )
 
@@ -1602,15 +2018,14 @@ def save_data_sheets(
 def save_project_theme(
     session: Session, project_id: str, selection: ThemeSelection
 ) -> ProjectDetail:
-    if selection.theme_id not in THEME_TOKENS:
-        raise HTTPException(status_code=422, detail="Unknown packet theme.")
+    theme_id = _resolve_theme_id(selection.theme_id)
     valid_templates = {template.id for template in list_template_library()}
     if selection.packet_template_id not in valid_templates:
         raise HTTPException(status_code=422, detail="Unknown packet template.")
     project = get_project(session, project_id)
     settings_json = _settings_with(
         project,
-        theme_id=selection.theme_id,
+        theme_id=theme_id,
         packet_template_id=selection.packet_template_id,
         theme_customization=selection.customization.model_dump(),
         brand_kit=selection.brand_kit.model_dump(),
@@ -1701,7 +2116,7 @@ def apply_bulk_project_action(
         elif action.action == "assign_theme":
             if not action.theme_id:
                 raise HTTPException(status_code=422, detail="Select a theme for bulk assignment.")
-            if action.theme_id not in THEME_TOKENS:
+            if not _theme_exists(action.theme_id):
                 raise HTTPException(status_code=422, detail="Unknown packet theme.")
             project = get_project(session, project_id)
             project.settings_json = _settings_with(project, theme_id=action.theme_id)
@@ -2025,13 +2440,32 @@ def _ordered_packet_pages(
     return output
 
 
-def _packet_styles(theme_id: str, customization: ThemeCustomization | None = None) -> str:
+def _font_stack(font_name: str) -> str:
+    stacks = {
+        "Open Sans": '"Open Sans", "Segoe UI", Arial, sans-serif',
+        "Poppins": '"Poppins", "Segoe UI", Arial, sans-serif',
+        "Segoe UI": '"Segoe UI", Arial, sans-serif',
+        "Arial": 'Arial, sans-serif',
+        "Georgia": 'Georgia, "Times New Roman", serif',
+        "Times New Roman": '"Times New Roman", Georgia, serif',
+    }
+    return stacks.get(font_name, stacks["Open Sans"])
+
+
+def _packet_styles(
+    theme_id: str,
+    customization: ThemeCustomization | None = None,
+    watermark_src: str = "",
+    font_name: str = "",
+) -> str:
     tokens = dict(THEME_TOKENS.get(theme_id, THEME_TOKENS["teacher_friendly"]))
     if customization is not None:
         tokens.update(
             {
                 "primary": customization.primary_color,
                 "accent": customization.secondary_color,
+                "blue": customization.secondary_color,
+                "teal": customization.secondary_color,
                 "orange": customization.accent_color,
                 "soft": customization.background_color,
                 "card": customization.card_color,
@@ -2051,7 +2485,7 @@ def _packet_styles(theme_id: str, customization: ThemeCustomization | None = Non
     * { box-sizing: border-box; }
     body {
       color: __TEXT__;
-      font-family: "Open Sans", "Segoe UI", Arial, sans-serif;
+      font-family: __BODY_FONT__;
       font-size: 11px;
       line-height: 1.42;
       margin: 0;
@@ -2078,6 +2512,21 @@ def _packet_styles(theme_id: str, customization: ThemeCustomization | None = Non
       position: relative;
     }
     .page:last-child { break-after: auto; }
+    body.has-watermark .page:not(.cover)::after {
+      background: url("__WATERMARK_SRC__") center center / 3.15in auto no-repeat;
+      bottom: 0.35in;
+      content: "";
+      left: 0.35in;
+      opacity: 0.055;
+      position: absolute;
+      right: 0.35in;
+      top: 0.35in;
+      z-index: 0;
+    }
+    body.has-watermark .page:not(.cover) > * {
+      position: relative;
+      z-index: 1;
+    }
     .page-header {
       align-items: center;
       border-bottom: 3px solid __BLUE__;
@@ -2169,6 +2618,9 @@ def _packet_styles(theme_id: str, customization: ThemeCustomization | None = Non
     .cover-bottom {
       position: relative;
       z-index: 2;
+    }
+    .cover-district-mark {
+      display: none;
     }
     .cover-kicker {
       color: #64ddd8;
@@ -2569,9 +3021,64 @@ def _packet_styles(theme_id: str, customization: ThemeCustomization | None = Non
     }
     body.template-mountain-illustrated .cover {
       background:
-        linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(239, 252, 252, 0.84) 50%, rgba(6, 92, 102, 0.88) 100%),
+        radial-gradient(circle at 50% 10%, rgba(255, 244, 194, 0.7), rgba(255,255,255,0.36) 12%, transparent 24%),
+        radial-gradient(circle at 50% 18%, rgba(255,255,255,0.9), transparent 31%),
+        linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(239, 252, 252, 0.9) 40%, rgba(178, 224, 224, 0.94) 61%, rgba(54, 127, 133, 0.97) 78%, rgba(3, 50, 57, 1) 100%),
         linear-gradient(145deg, #ffffff 0%, #d9f4f1 100%);
       color: __TEXT__;
+      min-height: 10.1in;
+    }
+    body.template-mountain-illustrated .cover-card {
+      min-height: 10.1in;
+    }
+    body.template-mountain-illustrated .cover:before,
+    body.template-mountain-illustrated .cover:after {
+      bottom: 0;
+      content: "";
+      position: absolute;
+      width: 0;
+      z-index: 0;
+    }
+    body.template-mountain-illustrated .cover:before {
+      border-left: 3.25in solid transparent;
+      border-right: 3.05in solid transparent;
+      border-bottom: 2.1in solid rgba(128, 202, 211, 0.52);
+      left: -1.3in;
+    }
+    body.template-mountain-illustrated .cover:after {
+      border-left: 3.6in solid transparent;
+      border-right: 2.75in solid transparent;
+      border-bottom: 2.26in solid rgba(28, 130, 155, 0.44);
+      right: -1.15in;
+    }
+    body.template-mountain-illustrated .cover-card:before,
+    body.template-mountain-illustrated .cover-card:after {
+      content: "";
+      display: none;
+    }
+    body.template-mountain-illustrated .cover-content {
+      margin-top: 0.1in;
+      position: relative;
+      text-align: center;
+      z-index: 3;
+    }
+    body.template-mountain-illustrated .cover-content:before,
+    body.template-mountain-illustrated .cover-content:after {
+      border-top: 2px solid rgba(11, 114, 133, 0.42);
+      border-radius: 999px 999px 0 0;
+      content: "";
+      height: 0.12in;
+      position: absolute;
+      top: -0.1in;
+      width: 0.24in;
+    }
+    body.template-mountain-illustrated .cover-content:before {
+      right: 1.15in;
+      transform: rotate(-14deg);
+    }
+    body.template-mountain-illustrated .cover-content:after {
+      right: 0.88in;
+      transform: rotate(14deg);
     }
     body.template-mountain-illustrated .cover-card h1,
     body.template-mountain-illustrated .cover-card h2,
@@ -2605,31 +3112,75 @@ def _packet_styles(theme_id: str, customization: ThemeCustomization | None = Non
       background: linear-gradient(135deg, #09345a, #13b7b4);
       border-color: rgba(255,255,255,0.8);
       color: #ffffff;
+      box-shadow: 0 8px 22px rgba(7, 61, 88, 0.22);
+    }
+    body.template-mountain-illustrated .brand-logo {
+      filter: drop-shadow(0 6px 10px rgba(7,61,88,0.18));
     }
     body.template-mountain-illustrated .meta-box {
-      background: rgba(255,255,255,0.78);
-      border-color: rgba(15, 45, 85, 0.2);
+      background: rgba(255,255,255,0.16);
+      border-color: rgba(255,255,255,0.26);
     }
     body.template-mountain-illustrated .meta-label {
-      color: #4b6b7b;
+      color: #9fe7ea;
+    }
+    body.template-mountain-illustrated .cover-bottom {
+      background: transparent;
+      border-top: 0;
+      color: #ffffff;
+      margin: 0 -52px -52px;
+      padding: 0.18in 0.52in 0.26in;
+      position: relative;
+      z-index: 4;
+    }
+    body.template-mountain-illustrated .cover-bottom:before {
+      display: none;
+    }
+    body.template-mountain-illustrated .cover-bottom:after {
+      display: none;
+    }
+    body.template-mountain-illustrated .cover-details {
+      margin-top: 0;
+      position: relative;
+      z-index: 5;
+    }
+    body.template-mountain-illustrated .cover-services {
+      margin: 0 0 0.16in;
+    }
+    body.template-mountain-illustrated .cover-bottom .service-chip,
+    body.template-mountain-illustrated .cover-bottom .meta-value {
+      color: #ffffff;
+    }
+    body.template-mountain-illustrated .cover-bottom .chip-dot {
+      background: rgba(8, 43, 67, 0.92);
+      border-color: rgba(255,255,255,0.28);
+      box-shadow: 0 5px 14px rgba(0,0,0,0.2);
+      color: #ffffff;
+    }
+    body.template-mountain-illustrated .cover-bottom .meta-grid {
+      margin-top: 0;
     }
     body.template-mountain-illustrated .mountains {
-      height: 180px;
-      opacity: 0.78;
+      background:
+        repeating-linear-gradient(90deg, rgba(3, 54, 60, 0.0) 0 0.18in, rgba(3, 54, 60, 0.5) 0.18in 0.21in, rgba(3, 54, 60, 0.0) 0.21in 0.36in);
+      bottom: -0.02in;
+      height: 2.72in;
+      opacity: 0.95;
+      z-index: 1;
     }
     body.template-mountain-illustrated .mountains:before {
-      border-left-width: 170px;
-      border-right-width: 170px;
-      border-bottom-width: 128px;
-      border-bottom-color: rgba(8, 93, 102, 0.78);
-      left: 20px;
+      border-left-width: 2.35in;
+      border-right-width: 2.25in;
+      border-bottom-width: 1.66in;
+      border-bottom-color: rgba(5, 94, 101, 0.94);
+      left: -0.1in;
     }
     body.template-mountain-illustrated .mountains:after {
-      border-left-width: 190px;
-      border-right-width: 190px;
-      border-bottom-width: 144px;
-      border-bottom-color: rgba(31, 111, 184, 0.35);
-      right: -10px;
+      border-left-width: 2.8in;
+      border-right-width: 2.65in;
+      border-bottom-width: 1.86in;
+      border-bottom-color: rgba(30, 125, 151, 0.88);
+      right: -0.45in;
     }
     body.template-elementary-pop .cover {
       background:
@@ -2897,100 +3448,241 @@ def _packet_styles(theme_id: str, customization: ThemeCustomization | None = Non
     body.template-purple-dot .mountains {
       display: none;
     }
+    body.template-modern-professional {
+      background: #eef3f7;
+      color: #14233c;
+    }
+    body.template-modern-professional h1,
+    body.template-modern-professional h2,
+    body.template-modern-professional h3,
+    body.template-modern-professional h4 {
+      color: #0d2848;
+      font-family: "Poppins", "Segoe UI", Arial, sans-serif;
+      letter-spacing: 0.01em;
+    }
     body.template-modern-professional .cover {
+      background: #ffffff !important;
+      color: #14233c;
+    }
+    body.template-modern-professional .cover-card {
       background:
-        linear-gradient(132deg, #ffffff 0 56%, rgba(23,124,151,0.08) 56% 100%),
-        #ffffff;
-      color: __TEXT__;
+        linear-gradient(132deg, #ffffff 0%, #ffffff 58%, #e9f8f8 58%, #e9f8f8 100%);
     }
     body.template-modern-professional .cover:before {
-      border-left: 410px solid transparent;
-      border-bottom: 320px solid #0d2848;
+      border-left: 5.55in solid transparent;
+      border-bottom: 3.05in solid #0d2848;
       bottom: 0;
       content: "";
       position: absolute;
       right: 0;
+      width: 0;
       z-index: 0;
     }
     body.template-modern-professional .cover:after {
-      border-left: 340px solid transparent;
-      border-bottom: 115px solid #0f8b8d;
+      border-left: 3.8in solid transparent;
+      border-bottom: 1.18in solid #0f8b8d;
       bottom: 0;
       content: "";
       position: absolute;
-      right: -70px;
-      z-index: 0;
+      right: 0;
+      z-index: 1;
     }
     body.template-modern-professional .cover-card {
       justify-content: space-between;
-      padding: 42px 48px 34px;
+      padding: 0.55in 0.58in 0.38in;
+    }
+    body.template-modern-professional .cover-content {
+      text-align: left;
+      width: 4.35in;
     }
     body.template-modern-professional .cover-icon {
       background: #0f8b8d;
       border: 0;
-      border-radius: 16px;
+      border-radius: 15px;
+      box-shadow: 0 8px 18px rgba(15,139,141,0.22);
       color: #ffffff;
+      height: 58px;
+      margin: 0 0 18px;
+      width: 58px;
     }
-    body.template-modern-professional .cover-card h1,
-    body.template-modern-professional .cover-student {
+    body.template-modern-professional .brand-logo {
+      height: 58px;
+      margin: 0 0 18px;
+      width: 92px;
+    }
+    body.template-modern-professional .cover-card h1 {
       color: #0d2848;
-      text-align: center;
+      font-size: 46px;
+      letter-spacing: -0.02em;
+      line-height: 0.96;
+      text-align: left;
     }
-    body.template-modern-professional .cover-kicker,
-    body.template-modern-professional .cover-school {
+    body.template-modern-professional .cover-kicker {
       color: #0f8b8d;
-      text-align: center;
+      font-size: 11px;
+      letter-spacing: 0.22em;
+      text-align: left;
+    }
+    body.template-modern-professional .cover-school {
+      color: #5d7284;
+      font-size: 9px;
+      letter-spacing: 0.14em;
+      text-align: left;
     }
     body.template-modern-professional .cover-year {
       background: #0f8b8d;
-      display: block;
-      margin-left: auto;
-      margin-right: auto;
-      max-width: 250px;
+      box-shadow: 0 5px 0 rgba(13,40,72,0.12);
+      display: inline-block;
+      margin: 20px 0 18px;
+      min-width: 1.8in;
       text-align: center;
     }
-    body.template-modern-professional .cover-bottom,
+    body.template-modern-professional .cover-student {
+      color: #0f8b8d;
+      font-size: 18px;
+      margin-top: 6px;
+      text-align: left;
+    }
+    body.template-modern-professional .cover-bottom {
+      background: #0d2848;
+      border-bottom: 0.13in solid #0f8b8d;
+      border-radius: 14px 14px 0 0;
+      color: #ffffff;
+      margin: 0;
+      padding: 0.16in 0.24in 0.1in;
+      width: 100%;
+    }
+    body.template-modern-professional .cover-services {
+      gap: 10px;
+      justify-content: center;
+      margin: 0 0 10px;
+    }
+    body.template-modern-professional .service-chip {
+      font-size: 7.5px;
+      gap: 5px;
+      max-width: 0.72in;
+    }
     body.template-modern-professional .cover-bottom .service-chip,
-    body.template-modern-professional .cover-bottom .meta-value,
-    body.template-modern-professional .cover-bottom .meta-label {
+    body.template-modern-professional .cover-bottom .meta-label,
+    body.template-modern-professional .cover-bottom .meta-value {
       color: #ffffff;
     }
     body.template-modern-professional .chip-dot {
-      background: #0d2848;
-      border-radius: 16px;
-      color: #ffffff;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.38);
+      border-radius: 15px;
+      color: #43c0bd;
+      font-size: 14px;
+      height: 36px;
+      width: 36px;
+    }
+    body.template-modern-professional .meta-grid {
+      border-collapse: separate;
+      border-spacing: 8px;
+      margin-left: auto;
+      margin-right: auto;
+      margin-top: 0;
+      width: 5.45in;
     }
     body.template-modern-professional .meta-box {
       background: rgba(255,255,255,0.08);
-      border-color: rgba(255,255,255,0.28);
+      border-color: rgba(255,255,255,0.24);
+      border-radius: 8px;
+      min-height: 0;
+      padding: 8px 9px;
+    }
+    body.template-modern-professional .meta-label {
+      font-size: 7.5px;
+    }
+    body.template-modern-professional .meta-value {
+      font-size: 10px;
     }
     body.template-modern-professional .mountains {
       display: none;
     }
     body.template-modern-professional .page:not(.cover) {
       background:
-        linear-gradient(90deg, rgba(15,139,141,0.13) 0 0.14in, transparent 0.14in),
+        linear-gradient(90deg, #0d2848 0%, #0d2848 1.6%, transparent 1.6%, transparent 100%),
+        linear-gradient(180deg, rgba(67,192,189,0.06), transparent 1.6in),
         #ffffff;
+      border-top: 0.04in solid #0d2848;
+      padding-left: 0.2in;
     }
     body.template-modern-professional .page-header {
-      background: linear-gradient(90deg, rgba(15,139,141,0.12), transparent);
-      border-bottom-color: #0f8b8d;
+      background: #f4fafb;
+      border: 1px solid #c9dce7;
+      border-bottom: 4px solid #0f8b8d;
+      border-radius: 10px;
+      margin-bottom: 14px;
       padding: 10px 12px;
+    }
+    body.template-modern-professional .page-header .badge {
+      background: #0d2848;
+      border-radius: 10px;
+      color: #43c0bd;
+    }
+    body.template-modern-professional .page-header.green,
+    body.template-modern-professional .page-header.purple,
+    body.template-modern-professional .page-header.orange {
+      border-bottom-color: #0f8b8d;
+    }
+    body.template-modern-professional .page-header h2 {
+      color: #0d2848;
+      margin-bottom: 0;
+    }
+    body.template-modern-professional .eyebrow {
+      color: #0f8b8d;
     }
     body.template-modern-professional .section,
     body.template-modern-professional .soft-card,
     body.template-modern-professional .goal-card {
-      border-left: 5px solid #0f8b8d;
+      background: #ffffff;
+      border: 1px solid #c9dce7;
+      border-left: 6px solid #0f8b8d;
+      border-radius: 10px;
+      box-shadow: 0 5px 14px rgba(13,40,72,0.06);
+    }
+    body.template-modern-professional .goal-card.green,
+    body.template-modern-professional .goal-card.purple {
+      background: #ffffff;
+      border-color: #c9dce7;
+      border-left-color: #0f8b8d;
+    }
+    body.template-modern-professional .domain-title .mini-dot,
+    body.template-modern-professional .badge,
+    body.template-modern-professional .badge.green,
+    body.template-modern-professional .badge.purple,
+    body.template-modern-professional .badge.orange {
+      background: #0d2848;
+      color: #43c0bd;
+    }
+    body.template-modern-professional th {
+      background: #0d2848;
+      color: #ffffff;
+      font-size: 8px;
+      letter-spacing: 0.04em;
+    }
+    body.template-modern-professional th,
+    body.template-modern-professional td {
+      border-color: #c9dce7;
+    }
+    body.template-modern-professional .staff-checklist {
+      background: #f4fafb;
+      border-color: #0f8b8d;
+      border-left: 6px solid #0f8b8d;
+    }
+    body.template-modern-professional .staff-checklist h3 {
+      color: #0d2848;
     }
     body.template-district-branding .cover {
       background: #ffffff;
-      border-bottom: 18px solid #d89a2b;
-      border-top: 18px solid #0d2848;
+      border-bottom: 18px solid __ORANGE__;
+      border-top: 18px solid __PRIMARY__;
       color: __TEXT__;
     }
     body.template-district-branding .cover:before {
-      color: rgba(13,40,72,0.14);
-      content: "DISTRICT BRANDING";
+      color: __BORDER__;
+      content: "";
       font-family: "Poppins", "Segoe UI", Arial, sans-serif;
       font-size: 13px;
       font-weight: 800;
@@ -3003,41 +3695,105 @@ def _packet_styles(theme_id: str, customization: ThemeCustomization | None = Non
       z-index: 0;
     }
     body.template-district-branding .cover:after {
-      background: linear-gradient(90deg, #0d2848, #154f85);
-      bottom: 0;
-      content: "";
-      height: 2.1in;
-      left: 0;
-      position: absolute;
-      right: 0;
-      z-index: 0;
+      display: none;
     }
     body.template-district-branding .cover-card {
       justify-content: space-between;
       padding: 42px 48px 34px;
     }
+    body.template-district-branding .cover-content {
+      text-align: center;
+      width: 100%;
+    }
     body.template-district-branding .cover-icon {
-      background: #0d2848;
-      border-color: #0d2848;
+      background: __PRIMARY__;
+      border-color: __PRIMARY__;
       color: #ffffff;
+      display: block;
+      line-height: 60px;
+      margin-left: auto;
+      margin-right: auto;
+      text-align: center;
     }
     body.template-district-branding .cover-card h1,
     body.template-district-branding .cover-student {
-      color: #0d2848;
+      color: __PRIMARY__;
       text-align: center;
     }
     body.template-district-branding .cover-kicker,
     body.template-district-branding .cover-school {
-      color: #d89a2b;
+      color: __ORANGE__;
       text-align: center;
     }
     body.template-district-branding .cover-year {
-      background: #d89a2b;
+      background: __ORANGE__;
       display: block;
       margin-left: auto;
       margin-right: auto;
       max-width: 250px;
       text-align: center;
+    }
+    body.template-district-branding .cover-district-mark {
+      color: __BORDER__;
+      display: block;
+      font-family: "Poppins", "Segoe UI", Arial, sans-serif;
+      font-size: 13px;
+      font-weight: 800;
+      left: -64px;
+      letter-spacing: 0.22em;
+      position: absolute;
+      text-transform: uppercase;
+      top: 178px;
+      transform: rotate(-90deg);
+      z-index: 1;
+      white-space: nowrap;
+    }
+    body.template-district-branding .cover-bottom {
+      background: linear-gradient(90deg, __PRIMARY__, __BLUE__);
+      border-bottom: 18px solid __ORANGE__;
+      margin-left: -48px;
+      margin-right: -48px;
+      padding: 0.18in 0.48in 0.22in;
+      width: auto;
+    }
+    body.template-district-branding .cover-services {
+      border-collapse: separate;
+      display: table;
+      margin: 0 auto 0.18in;
+      table-layout: fixed;
+      width: 4.4in;
+    }
+    body.template-district-branding .cover-services.service-count-1 {
+      width: 1.1in;
+    }
+    body.template-district-branding .cover-services.service-count-2 {
+      width: 2.35in;
+    }
+    body.template-district-branding .cover-services.service-count-3 {
+      width: 3.45in;
+    }
+    body.template-district-branding .cover-services.service-count-4 {
+      width: 4.55in;
+    }
+    body.template-district-branding .cover-services:empty {
+      display: none;
+    }
+    body.template-district-branding .cover-services .service-chip {
+      display: table-cell;
+      padding: 0 8px;
+      vertical-align: top;
+      width: 25%;
+    }
+    body.template-district-branding .cover-services .service-chip span:last-child {
+      display: block;
+      line-height: 1.12;
+      margin: 0;
+    }
+    body.template-district-branding .service-chip {
+      color: #ffffff;
+      font-size: 8px;
+      gap: 6px;
+      max-width: 0.9in;
     }
     body.template-district-branding .cover-bottom,
     body.template-district-branding .cover-bottom .service-chip,
@@ -3046,18 +3802,32 @@ def _packet_styles(theme_id: str, customization: ThemeCustomization | None = Non
       color: #ffffff;
     }
     body.template-district-branding .chip-dot {
-      background: #1d6fb8;
+      background: __BLUE__;
+      border-color: rgba(255,255,255,0.35);
       color: #ffffff;
+      display: block;
+      height: 42px;
+      line-height: 42px;
+      margin: 0 auto 6px;
+      text-align: center;
+      width: 42px;
+    }
+    body.template-district-branding .meta-grid {
+      border-spacing: 12px;
+      margin-left: auto;
+      margin-right: auto;
+      table-layout: fixed;
+      width: 5.45in;
     }
     body.template-district-branding .meta-box {
       background: rgba(255,255,255,0.08);
       border-color: rgba(255,255,255,0.28);
     }
     body.template-district-branding .page:not(.cover) {
-      border-top: 10px solid #0d2848;
+      border-top: 10px solid __PRIMARY__;
     }
     body.template-district-branding .page-header {
-      border-bottom-color: #d89a2b;
+      border-bottom-color: __ORANGE__;
     }
     body.template-mountain-illustrated .page:not(.cover) {
       background:
@@ -3244,6 +4014,8 @@ def _packet_styles(theme_id: str, customization: ThemeCustomization | None = Non
         .replace("__BORDER__", tokens["border"])
         .replace("__SOFT__", tokens["soft"])
         .replace("__CARD__", tokens.get("card", "#ffffff"))
+        .replace("__WATERMARK_SRC__", watermark_src.replace("\\", "/"))
+        .replace("__BODY_FONT__", _font_stack(font_name))
     )
 
 
@@ -3351,6 +4123,20 @@ def _build_packet_html(
         """
         for name in service_names[:4]
     )
+    service_count = min(len(service_names), 4)
+    district_mark = (
+        detail.brand_kit.district_name
+        or detail.brand_kit.school_name
+        or "District Branding"
+    )
+    watermark_src = (
+        detail.brand_kit.watermark_logo_relative_path
+        if detail.brand_kit.watermark_enabled and detail.brand_kit.watermark_logo_relative_path
+        else ""
+    )
+    body_classes = [f"template-{packet_template_id.replace('_', '-')}"]
+    if watermark_src:
+        body_classes.append("has-watermark")
     identity_html = '<div class="cover-icon">SP</div>'
     if detail.brand_kit.logo_relative_path:
         logo_src = detail.brand_kit.logo_relative_path.replace("\\", "/")
@@ -3359,6 +4145,7 @@ def _build_packet_html(
         f"""
         <section class="page cover">
           <div class="cover-card">
+            <div class="cover-district-mark">{escape(district_mark)}</div>
             <div class="cover-content">
               {identity_html}
               <p class="cover-kicker">Special Education</p>
@@ -3369,7 +4156,7 @@ def _build_packet_html(
             </div>
             <div class="cover-bottom">
               <div class="cover-details">
-              <div class="cover-services">{cover_chips}</div>
+              <div class="cover-services service-count-{service_count}">{cover_chips}</div>
               <table class="meta-grid" aria-label="Student packet details">
                 <tbody>
                   <tr>
@@ -3542,7 +4329,7 @@ def _build_packet_html(
     checklist_items = detail.observation_checklist or DEFAULT_OBSERVATION_CHECKLIST
     checklist_html = f"""
       <div class="staff-checklist" style="margin-top: 12px;">
-        <h3 style="color: #ef7900;">Things Staff Need To Tell {escape(student.case_manager_first_name if student and student.case_manager_first_name else "The Case Manager")}</h3>
+        <h3 style="color: #ef7900;">Things Staff Need To Tell {escape(student.case_manager if student and student.case_manager else "The Case Manager")}</h3>
         {_checklist_table(checklist_items)}
       </div>
     """
@@ -3583,8 +4370,8 @@ def _build_packet_html(
 
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
-        f"<title>{escape(detail.name)}</title><style>{_packet_styles(theme_id, customization or detail.theme_customization)}</style>"
-        f"</head><body class=\"template-{escape(packet_template_id.replace('_', '-'))}\">"
+        f"<title>{escape(detail.name)}</title><style>{_packet_styles(theme_id, customization or detail.theme_customization, watermark_src, detail.brand_kit.default_fonts)}</style>"
+        f"</head><body class=\"{escape(' '.join(body_classes))}\">"
         + "".join(_ordered_packet_pages(rendered_pages, packet_config))
         + "</body></html>"
     )
@@ -3682,8 +4469,6 @@ def preview_pdf(
     session: Session, project_id: str, request: ExportRequest | None = None
 ) -> bytes:
     request = request or ExportRequest()
-    if request.theme_id not in THEME_TOKENS:
-        raise HTTPException(status_code=422, detail="Unknown packet theme.")
     valid_templates = {template.id for template in list_template_library()}
     if request.packet_template_id and request.packet_template_id not in valid_templates:
         raise HTTPException(status_code=422, detail="Unknown packet template.")
@@ -3694,7 +4479,7 @@ def preview_pdf(
     return _render_packet_pdf_bytes(
         detail,
         packet,
-        theme_id=request.theme_id or detail.theme_id,
+        theme_id=_resolve_theme_id(request.theme_id or detail.theme_id),
         packet_template_id=request.packet_template_id or detail.packet_template_id,
     )
 
@@ -3705,8 +4490,6 @@ def generate_pdf_export(
     request = request or ExportRequest()
     if request.export_mode == "zip_archive":
         return generate_zip_export(session, project_id, request)
-    if request.theme_id not in THEME_TOKENS:
-        raise HTTPException(status_code=422, detail="Unknown packet theme.")
     valid_templates = {template.id for template in list_template_library()}
     if request.packet_template_id and request.packet_template_id not in valid_templates:
         raise HTTPException(status_code=422, detail="Unknown packet template.")
@@ -3715,7 +4498,7 @@ def generate_pdf_export(
     _ensure_export_ready(detail)
 
     packet = _resolve_packet_version(project, session, request.packet_version_id)
-    theme_id = request.theme_id or detail.theme_id
+    theme_id = _resolve_theme_id(request.theme_id or detail.theme_id)
     packet_template_id = request.packet_template_id or detail.packet_template_id
     pdf_bytes = _render_packet_pdf_bytes(
         detail,
@@ -3774,8 +4557,6 @@ def generate_zip_export(
     session: Session, project_id: str, request: ExportRequest | None = None
 ) -> ExportResponse:
     request = request or ExportRequest(export_mode="zip_archive")
-    if request.theme_id not in THEME_TOKENS:
-        raise HTTPException(status_code=422, detail="Unknown packet theme.")
     valid_templates = {template.id for template in list_template_library()}
     if request.packet_template_id and request.packet_template_id not in valid_templates:
         raise HTTPException(status_code=422, detail="Unknown packet template.")
@@ -3786,7 +4567,7 @@ def generate_zip_export(
     if not versions:
         versions = [_ensure_export_packet(project, session)]
 
-    theme_id = request.theme_id or detail.theme_id
+    theme_id = _resolve_theme_id(request.theme_id or detail.theme_id)
     packet_template_id = request.packet_template_id or detail.packet_template_id
     custom_name = (
         request.filename_template

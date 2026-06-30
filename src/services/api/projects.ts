@@ -1,4 +1,5 @@
 import type {
+  AppSettings,
   AtAGlanceSection,
   BackupResult,
   BrandKitLibraryDraft,
@@ -12,6 +13,7 @@ import type {
   ExportSettings,
   ExportResult,
   ThemeOption,
+  ThemePaletteDraft,
   GoalDraft,
   PacketTemplateLibraryDraft,
   PacketTemplateLibraryItem,
@@ -152,6 +154,37 @@ export function listThemes() {
   return apiGet<ThemeOption[]>("/projects/themes");
 }
 
+export function getAppSettings() {
+  return apiGet<AppSettings>("/projects/app-settings");
+}
+
+export function saveAppSettings(value: AppSettings) {
+  return apiRequest<AppSettings>("/projects/app-settings", {
+    method: "PUT",
+    body: value,
+  });
+}
+
+export function createThemePalette(value: ThemePaletteDraft) {
+  return apiRequest<ThemeOption>("/projects/themes", {
+    method: "POST",
+    body: value,
+  });
+}
+
+export function updateThemePalette(themeId: string, value: ThemePaletteDraft) {
+  return apiRequest<ThemeOption>(`/projects/themes/${themeId}`, {
+    method: "PUT",
+    body: value,
+  });
+}
+
+export function deleteThemePalette(themeId: string) {
+  return apiRequest<void>(`/projects/themes/${themeId}`, {
+    method: "DELETE",
+  });
+}
+
 export function listPacketTemplates() {
   return apiGet<PacketTemplateOption[]>("/projects/packet-templates");
 }
@@ -233,6 +266,7 @@ export function uploadBrandKitLogo(value: {
   filename: string;
   contentType: string;
   dataBase64: string;
+  logoKind?: "cover" | "watermark";
 }) {
   return apiRequest<BrandKitLibraryItem>("/projects/brand-kits/logo", {
     method: "POST",
@@ -241,6 +275,7 @@ export function uploadBrandKitLogo(value: {
       filename: value.filename,
       content_type: value.contentType,
       data_base64: value.dataBase64,
+      logo_kind: value.logoKind ?? "cover",
     },
   });
 }
@@ -308,7 +343,7 @@ export function generatePdfExport(
     method: "POST",
     body: {
       packet_version_id: options.packetVersionId ?? null,
-      theme_id: options.themeId ?? "teacher_friendly",
+      theme_id: options.themeId ?? "",
       packet_template_id: options.packetTemplateId ?? null,
       filename_template: options.filenameTemplate ?? null,
       export_mode: options.exportMode ?? "single_pdf",
@@ -329,7 +364,7 @@ export function generateAllPdfExports(
     method: "POST",
     body: {
       packet_version_id: null,
-      theme_id: options.themeId ?? "teacher_friendly",
+      theme_id: options.themeId ?? "",
       packet_template_id: options.packetTemplateId ?? null,
       filename_template: options.filenameTemplate ?? null,
       export_mode: options.exportMode ?? "zip_archive",
@@ -355,7 +390,7 @@ export async function previewPdfExport(
     },
     body: JSON.stringify({
       packet_version_id: options.packetVersionId ?? null,
-      theme_id: options.themeId ?? "teacher_friendly",
+      theme_id: options.themeId ?? "",
       packet_template_id: options.packetTemplateId ?? null,
       filename_template: options.filenameTemplate ?? null,
       export_mode: options.exportMode ?? "single_pdf",

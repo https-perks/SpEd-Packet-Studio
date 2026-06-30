@@ -13,14 +13,19 @@ from backend.database.migrations.runner import run_migrations
 from backend.database.session import SessionLocal, engine
 from backend.generators.pdf import renderer_available
 from backend.schemas.projects import (
+    AppSettings,
     AtAGlanceDraft,
     BulkProjectAction,
+    CaseManagerProfile,
     DataSheetsDraft,
+    DataSheetColumnDraft,
     DuplicateOptions,
     ExportSettingsSelection,
+    ExportSettings,
     GoalsDraft,
     ObservationChecklistDraft,
     PacketBuilderDraft,
+    ServiceAreaDraft,
     StudentSetupDraft,
     ThemeSelection,
 )
@@ -39,7 +44,58 @@ class ProjectWorkflowTests(unittest.TestCase):
 
     def test_sprint_one_project_workflow(self) -> None:
         with SessionLocal() as session:
+            projects.save_app_settings(
+                AppSettings(
+                    default_school_year="2027-2028",
+                    default_theme_id="minimal",
+                    default_packet_template_id="modern_professional",
+                    default_export_settings=ExportSettings(
+                        filename_template="<Student Name> - <Packet Type> - <School Year>",
+                        last_export_location="",
+                        export_mode="single_pdf",
+                    ),
+                    default_observation_checklist=["Call family", "Tell case manager"],
+                    default_data_sheet_columns=[
+                        DataSheetColumnDraft(
+                            id="date",
+                            title="Date",
+                            column_type="date",
+                            position=0,
+                        ),
+                        DataSheetColumnDraft(
+                            id="score",
+                            title="Score",
+                            column_type="number",
+                            position=1,
+                        ),
+                    ],
+                    service_area_presets=[
+                        ServiceAreaDraft(
+                            name="Math",
+                            setting="Special Education",
+                            minutes_per_week=90,
+                            delivery_model="pull_out",
+                            notes="",
+                            position=0,
+                        )
+                    ],
+                    case_manager_profile=CaseManagerProfile(
+                        first_name="Default",
+                        last_name="Manager",
+                        phone="555-2222",
+                        email="default.manager@example.edu",
+                        school="Default School",
+                        notes="Global profile note.",
+                    ),
+                )
+            )
             created = projects.create_project(session)
+            self.assertEqual(created.school_year, "2027-2028")
+            self.assertEqual(created.theme_id, "minimal")
+            self.assertEqual(created.export_settings.filename_template, "<Student Name> - <Packet Type> - <School Year>")
+            self.assertEqual(created.observation_checklist, ["Call family", "Tell case manager"])
+            self.assertEqual(created.student.case_manager if created.student else None, "Default Manager")
+            self.assertEqual(projects.get_app_settings().service_area_presets[0].name, "Math")
             setup = StudentSetupDraft.model_validate(
                 {
                     "project_name": "",
@@ -247,8 +303,82 @@ class ProjectWorkflowTests(unittest.TestCase):
             self.assertEqual(detail.packet_template_id, "mountain_illustrated")
             self.assertEqual(detail.brand_kit.district_name, "Gardiner Public Schools")
             themes = projects.list_themes()
-            self.assertEqual([theme.id for theme in themes], ["teacher_friendly", "minimal"])
+            self.assertEqual([theme.id for theme in themes], ["teacher_friendly", "minimal", "district_colors"])
             self.assertTrue(themes[0].default_customization)
+            updated_builtin_palette = projects.update_theme_palette(
+                "district_colors",
+                projects.ThemePaletteDraft(
+                    name="District Brand Colors",
+                    description="Editable built-in district palette.",
+                    category="District",
+                    customization=projects.ThemeCustomization(
+                        primary_color="#3b1f63",
+                        secondary_color="#8756c8",
+                        accent_color="#f0b429",
+                        background_color="#ffffff",
+                        card_color="#ffffff",
+                        text_color="#1f1830",
+                    ),
+                ),
+            )
+            self.assertTrue(updated_builtin_palette.is_builtin)
+            self.assertEqual(updated_builtin_palette.name, "District Brand Colors")
+            self.assertEqual(
+                projects._customization_from_tokens("district_colors").primary_color,  # noqa: SLF001 - palette override regression
+                "#3b1f63",
+            )
+            projects.delete_theme_palette("district_colors")
+            self.assertNotIn("district_colors", [theme.id for theme in projects.list_themes()])
+            detail = projects.save_project_theme(
+                session,
+                created.id,
+                ThemeSelection.model_validate(
+                    {
+                        "theme_id": "district_colors",
+                        "packet_template_id": "mountain_illustrated",
+                        "customization": detail.theme_customization.model_dump(),
+                        "brand_kit": detail.brand_kit.model_dump(),
+                    }
+                ),
+            )
+            self.assertNotEqual(detail.theme_id, "district_colors")
+            with self.assertRaises(Exception):
+                projects.delete_theme_palette("minimal")
+            custom_palette = projects.create_theme_palette(
+                projects.ThemePaletteDraft(
+                    name="Gardiner Colors",
+                    description="Reusable district colors.",
+                    category="District",
+                    customization=projects.ThemeCustomization(
+                        primary_color="#3b1f63",
+                        secondary_color="#8756c8",
+                        accent_color="#f0b429",
+                        background_color="#ffffff",
+                        card_color="#ffffff",
+                        text_color="#1f1830",
+                    ),
+                )
+            )
+            self.assertFalse(custom_palette.is_builtin)
+            self.assertIn(custom_palette.id, [theme.id for theme in projects.list_themes()])
+            updated_palette = projects.update_theme_palette(
+                custom_palette.id,
+                projects.ThemePaletteDraft(
+                    name="Gardiner Gold",
+                    description="Updated reusable district colors.",
+                    category="District",
+                    customization=projects.ThemeCustomization(
+                        primary_color="#123456",
+                        secondary_color="#345678",
+                        accent_color="#abcdef",
+                        background_color="#ffffff",
+                        card_color="#ffffff",
+                        text_color="#111111",
+                    ),
+                ),
+            )
+            self.assertEqual(updated_palette.name, "Gardiner Gold")
+            self.assertEqual(updated_palette.default_customization["primary_color"], "#123456")
             detail = projects.upload_brand_logo(
                 session,
                 created.id,
@@ -284,7 +414,7 @@ class ProjectWorkflowTests(unittest.TestCase):
                     description="Dashboard managed template.",
                     category="Custom",
                     base_template_id="district_branding",
-                    theme_id="minimal",
+                    theme_id=custom_palette.id,
                     customization=projects.ThemeCustomization(
                         primary_color="#111827",
                         secondary_color="#4b5563",
@@ -296,6 +426,47 @@ class ProjectWorkflowTests(unittest.TestCase):
                 )
             )
             self.assertFalse(custom_template.is_builtin)
+            self.assertEqual(custom_template.theme_id, custom_palette.id)
+            updated_builtin_template = projects.update_template_library_item(
+                "district_branding",
+                projects.PacketTemplateLibraryDraft(
+                    name="District Branding",
+                    description="District template with saved palette.",
+                    category="District",
+                    base_template_id="district_branding",
+                    theme_id=custom_palette.id,
+                    customization=projects.ThemeCustomization(
+                        primary_color="#123456",
+                        secondary_color="#345678",
+                        accent_color="#abcdef",
+                        background_color="#ffffff",
+                        card_color="#ffffff",
+                        text_color="#111111",
+                    ),
+                ),
+            )
+            self.assertTrue(updated_builtin_template.is_builtin)
+            reopened_builtin_template = next(
+                template
+                for template in projects.list_template_library()
+                if template.id == "district_branding"
+            )
+            self.assertEqual(reopened_builtin_template.theme_id, custom_palette.id)
+            self.assertEqual(
+                projects._customization_for_template("district_branding").primary_color,  # noqa: SLF001 - template export color regression
+                "#123456",
+            )
+            builtin_template_html = projects._build_packet_html(  # noqa: SLF001 - template export color regression
+                detail,
+                theme_id=reopened_builtin_template.theme_id,
+                packet_template_id=reopened_builtin_template.base_template_id,
+                packet_version_name=detail.packet_versions[0].name,
+                packet_config=detail.packet_builder[0],
+                customization=projects._customization_for_template("district_branding"),  # noqa: SLF001
+            )
+            self.assertIn("#123456", builtin_template_html)
+            projects.delete_theme_palette(custom_palette.id)
+            self.assertNotIn(custom_palette.id, [theme.id for theme in projects.list_themes()])
             self.assertIn(
                 custom_template.id,
                 [template.id for template in projects.list_packet_templates()],

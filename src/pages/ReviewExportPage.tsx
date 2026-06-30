@@ -8,20 +8,44 @@ import {
   createProjectBackup,
   exportDownloadUrl,
   generatePdfExport,
-  listPacketTemplates,
+  listBrandKits,
+  listTemplateLibrary,
   previewPdfExport,
   saveExportSettings,
   saveProjectTheme,
 } from "../services/api/projects";
 import type {
   BackupResult,
+  BrandKit,
+  BrandKitLibraryItem,
   ExportMode,
   ExportSettings,
   ExportResult,
-  PacketTemplateOption,
+  PacketTemplateLibraryItem,
   ProjectDetail,
   StepValidation,
 } from "../types/projects";
+
+const emptyBrandKit: BrandKit = {
+  id: "personal",
+  name: "No Brand Kit",
+  district_name: "",
+  school_name: "",
+  district_logo_label: "",
+  school_logo_label: "",
+  logo_relative_path: "",
+  logo_filename: "",
+  watermark_logo_relative_path: "",
+  watermark_logo_filename: "",
+  watermark_enabled: false,
+  default_fonts: "",
+  primary_color: "#0f2d55",
+  secondary_color: "#27b8b2",
+  accent_color: "#ef7900",
+  preferred_cover_style: "modern_professional",
+  footer_text: "",
+  default_filename_template: "",
+};
 
 function combinedValidation(project: ProjectDetail): StepValidation {
   const issues = [
@@ -37,6 +61,29 @@ function formatBytes(value: number) {
   if (value < 1024) return `${value} bytes`;
   if (value < 1024 * 1024) return `${Math.round(value / 102.4) / 10} KB`;
   return `${Math.round(value / 1024 / 102.4) / 10} MB`;
+}
+
+function projectBrandKit(value: BrandKit | BrandKitLibraryItem): BrandKit {
+  return {
+    id: value.id,
+    name: value.name,
+    district_name: value.district_name,
+    school_name: value.school_name,
+    district_logo_label: value.district_logo_label,
+    school_logo_label: value.school_logo_label,
+    logo_relative_path: value.logo_relative_path,
+    logo_filename: value.logo_filename,
+    watermark_logo_relative_path: value.watermark_logo_relative_path,
+    watermark_logo_filename: value.watermark_logo_filename,
+    watermark_enabled: value.watermark_enabled,
+    default_fonts: value.default_fonts,
+    primary_color: value.primary_color,
+    secondary_color: value.secondary_color,
+    accent_color: value.accent_color,
+    preferred_cover_style: value.preferred_cover_style,
+    footer_text: value.footer_text,
+    default_filename_template: value.default_filename_template,
+  };
 }
 
 interface ReviewExportPageProps {
@@ -55,7 +102,9 @@ export function ReviewExportPage({
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
   const [backupResult, setBackupResult] = useState<BackupResult | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
-  const [packetTemplates, setPacketTemplates] = useState<PacketTemplateOption[]>([]);
+  const [packetTemplates, setPacketTemplates] = useState<PacketTemplateLibraryItem[]>([]);
+  const [brandKits, setBrandKits] = useState<BrandKitLibraryItem[]>([]);
+  const [selectedBrandKitId, setSelectedBrandKitId] = useState(project.brand_kit.id !== "personal" ? project.brand_kit.id : "");
   const [selectedThemeId, setSelectedThemeId] = useState(project.theme_id || "teacher_friendly");
   const [selectedTemplateId, setSelectedTemplateId] = useState(project.packet_template_id || "modern_professional");
   const [exportSettings, setExportSettings] = useState<ExportSettings>(project.export_settings);
@@ -70,10 +119,18 @@ export function ReviewExportPage({
   const validation = combinedValidation(project);
 
   useEffect(() => {
-    void listPacketTemplates()
+    void listTemplateLibrary()
       .then(setPacketTemplates)
       .catch(() => setPacketTemplates([]));
+    void listBrandKits()
+      .then((kits) => setBrandKits(kits.filter((kit) => kit.id !== "personal")))
+      .catch(() => setBrandKits([]));
   }, []);
+
+  function brandKitForSelection(brandKitId: string): BrandKit {
+    const selected = brandKits.find((kit) => kit.id === brandKitId);
+    return selected ? projectBrandKit(selected) : emptyBrandKit;
+  }
 
   async function handleExport() {
     setExporting(true);
@@ -118,18 +175,22 @@ export function ReviewExportPage({
   async function saveThemeSettings(next: {
     themeId?: string;
     templateId?: string;
+    brandKitId?: string;
   }) {
-    const themeId = next.themeId ?? selectedThemeId;
+    const selectedTemplate = packetTemplates.find((template) => template.id === (next.templateId ?? selectedTemplateId));
+    const themeId = next.themeId ?? selectedTemplate?.theme_id ?? selectedThemeId;
     const templateId = next.templateId ?? selectedTemplateId;
+    const brandKitId = next.brandKitId ?? selectedBrandKitId;
     setSelectedThemeId(themeId);
     setSelectedTemplateId(templateId);
+    setSelectedBrandKitId(brandKitId);
     setError("");
     try {
       const saved = await saveProjectTheme(project.id, {
         theme_id: themeId,
         packet_template_id: templateId,
-        theme_customization: project.theme_customization,
-        brand_kit: project.brand_kit,
+        theme_customization: selectedTemplate?.customization ?? project.theme_customization,
+        brand_kit: brandKitForSelection(brandKitId),
       });
       onProjectUpdate(saved);
     } catch (reason) {
@@ -248,6 +309,29 @@ export function ReviewExportPage({
                 </button>
               ))}
             </div>
+          </Card>
+
+          <Card title="Brand Kit" description="Optionally apply district identity, cover logo, and watermark settings.">
+            <label className="text-sm font-semibold text-[var(--theme-text)]">
+              Brand Kit
+              <select
+                className="mt-2 w-full rounded-xl border border-[var(--theme-border)] bg-white px-3.5 py-2.5 text-sm shadow-sm outline-none focus:border-[var(--theme-primary)] focus:ring-2 focus:ring-[var(--theme-primary-soft)]"
+                value={selectedBrandKitId}
+                onChange={(event) => void saveThemeSettings({ brandKitId: event.target.value })}
+              >
+                <option value="">None</option>
+                {brandKits.map((kit) => (
+                  <option key={kit.id} value={kit.id}>
+                    {kit.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectedBrandKitId && (
+              <p className="mt-3 text-sm leading-6 text-[var(--theme-text-muted)]">
+                Selected kit will be applied to previews and exports. Colors still come from the selected template palette.
+              </p>
+            )}
           </Card>
 
           {backupResult && (

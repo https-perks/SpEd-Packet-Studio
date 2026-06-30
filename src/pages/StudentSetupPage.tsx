@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { FieldFrame, selectClass, TextArea, TextInput } from "../components/ui/FormField";
@@ -6,8 +6,9 @@ import { ValidationSummary } from "../components/workflow/ValidationSummary";
 import { WorkflowHeader } from "../components/workflow/WorkflowHeader";
 import { useAutosave } from "../hooks/useAutosave";
 import { validateStudentSetup } from "../lib/validation";
-import { saveStudentSetup } from "../services/api/projects";
+import { getAppSettings, saveAppSettings, saveStudentSetup } from "../services/api/projects";
 import type {
+  AppSettings,
   Audience,
   DeliveryModel,
   ProjectDetail,
@@ -25,6 +26,14 @@ const audienceOptions: readonly { value: Audience; label: string }[] = [
 
 const settingOptions = ["Regular Education", "Special Education"] as const;
 const customSettingValue = "__custom_setting__";
+
+const fallbackServiceAreaPresets = [
+  "Reading",
+  "Math",
+  "Written Expression",
+  "Social/Emotional/Behavioral",
+  "Self-Help/Independence",
+];
 
 function deriveInitials(name: string) {
   return name
@@ -117,6 +126,10 @@ export function StudentSetupPage({
 }: StudentSetupPageProps) {
   const [draft, setDraft] = useState<StudentSetupDraft>(() => initialDraft(project));
   const [saveError, setSaveError] = useState("");
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [openServiceAreaMenu, setOpenServiceAreaMenu] = useState<number | null>(null);
+  const [addingServiceAreaForIndex, setAddingServiceAreaForIndex] = useState<number | null>(null);
+  const [newServiceAreaName, setNewServiceAreaName] = useState("");
   const [customSettingRows, setCustomSettingRows] = useState<ReadonlySet<string>>(
     () =>
       new Set(
@@ -127,6 +140,18 @@ export function StudentSetupPage({
       ),
   );
   const validation = useMemo(() => validateStudentSetup(draft), [draft]);
+  const serviceAreaOptions = useMemo(() => {
+    const saved = appSettings?.service_area_presets
+      .map((area) => area.name.trim())
+      .filter(Boolean) ?? [];
+    return saved.length ? saved : fallbackServiceAreaPresets;
+  }, [appSettings]);
+
+  useEffect(() => {
+    void getAppSettings()
+      .then(setAppSettings)
+      .catch(() => setAppSettings(null));
+  }, []);
 
   const autosave = useAutosave({
     value: draft,
@@ -199,6 +224,56 @@ export function StudentSetupPage({
         areaIndex === index ? { ...area, ...patch } : area,
       ),
     }));
+  }
+
+  async function updateServiceAreaPresets(names: string[]) {
+    if (!appSettings) return;
+    const uniqueNames = Array.from(new Set(names.map((name) => name.trim()).filter(Boolean)));
+    const nextSettings = {
+      ...appSettings,
+      service_area_presets: uniqueNames.map((name, position) => ({
+        id: null,
+        name,
+        setting: "",
+        minutes_per_week: null,
+        delivery_model: null,
+        notes: "",
+        position,
+      })),
+    };
+    setAppSettings(nextSettings);
+    try {
+      setAppSettings(await saveAppSettings(nextSettings));
+      setSaveError("");
+    } catch (reason) {
+      setSaveError(reason instanceof Error ? reason.message : "Service area list could not be saved.");
+    }
+  }
+
+  function openAddServiceAreaPreset(index: number) {
+    setAddingServiceAreaForIndex(index);
+    setNewServiceAreaName("");
+    setOpenServiceAreaMenu(null);
+  }
+
+  async function saveNewServiceAreaPreset() {
+    const trimmed = newServiceAreaName.trim();
+    if (addingServiceAreaForIndex === null) return;
+    if (!trimmed) return;
+    await updateServiceAreaPresets([...serviceAreaOptions, trimmed]);
+    updateArea(addingServiceAreaForIndex, { name: trimmed });
+    setAddingServiceAreaForIndex(null);
+    setNewServiceAreaName("");
+    setOpenServiceAreaMenu(null);
+  }
+
+  function closeAddServiceAreaPreset() {
+    setAddingServiceAreaForIndex(null);
+    setNewServiceAreaName("");
+  }
+
+  async function deleteServiceAreaPreset(name: string) {
+    await updateServiceAreaPresets(serviceAreaOptions.filter((option) => option !== name));
   }
 
   function moveArea(index: number, direction: -1 | 1) {
@@ -363,7 +438,60 @@ export function StudentSetupPage({
                   </div>
                   <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                     <FieldFrame label="Service area" htmlFor={`area-${index}-name`} required>
-                      <TextInput id={`area-${index}-name`} value={area.name} onChange={(event) => updateArea(index, { name: event.target.value })} placeholder="Reading, mathematics..." />
+                      <div className="relative">
+                        <button
+                          className={`${selectClass} text-left`}
+                          id={`area-${index}-name`}
+                          type="button"
+                          onClick={() => setOpenServiceAreaMenu((current) => current === index ? null : index)}
+                        >
+                          {area.name || "Select service area"}
+                        </button>
+                        {openServiceAreaMenu === index && (
+                          <div className="absolute z-30 mt-2 max-h-72 w-full overflow-auto rounded-xl border border-[var(--theme-border)] bg-white p-1 shadow-xl">
+                            {serviceAreaOptions.map((option) => (
+                              <button
+                                key={option}
+                                className="group flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm text-[var(--theme-text)] transition hover:bg-[var(--theme-primary-soft)]"
+                                type="button"
+                                onClick={() => {
+                                  updateArea(index, { name: option });
+                                  setOpenServiceAreaMenu(null);
+                                }}
+                              >
+                                <span>{option}</span>
+                                <span
+                                  aria-label={`Delete ${option}`}
+                                  className="rounded-md px-2 py-0.5 text-xs font-bold text-[var(--theme-text-muted)] opacity-0 transition hover:bg-white hover:text-[var(--theme-error)] group-hover:opacity-100"
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    void deleteServiceAreaPreset(option);
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      void deleteServiceAreaPreset(option);
+                                    }
+                                  }}
+                                >
+                                  X
+                                </span>
+                              </button>
+                            ))}
+                            <button
+                              className="mt-1 w-full rounded-lg border border-dashed border-[var(--theme-border)] px-3 py-2 text-left text-sm font-semibold text-[var(--theme-primary)] transition hover:bg-[var(--theme-surface-muted)]"
+                              type="button"
+                              onClick={() => openAddServiceAreaPreset(index)}
+                            >
+                              Add new service area
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </FieldFrame>
                     <FieldFrame label="Setting" htmlFor={`area-${index}-setting`}>
                       <select
@@ -444,6 +572,54 @@ export function StudentSetupPage({
           </div>
         </footer>
       </div>
+      {addingServiceAreaForIndex !== null && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-6">
+          <div className="w-full max-w-md rounded-2xl border border-[var(--theme-border)] bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--theme-accent)]">
+                  Service Areas
+                </p>
+                <h2 className="mt-2 text-2xl font-semibold text-[var(--theme-primary)]">
+                  Add Service Area
+                </h2>
+                <p className="mt-1 text-sm text-[var(--theme-text-muted)]">
+                  Add a reusable option to the service area dropdown, then use it for this row.
+                </p>
+              </div>
+              <Button variant="text" onClick={closeAddServiceAreaPreset}>
+                Close
+              </Button>
+            </div>
+
+            <label className="mt-5 block text-sm font-semibold text-[var(--theme-text)]">
+              Service area name
+              <TextInput
+                className="mt-2"
+                value={newServiceAreaName}
+                onChange={(event) => setNewServiceAreaName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void saveNewServiceAreaPreset();
+                  }
+                }}
+                autoFocus
+                placeholder="Example: Speech/Language"
+              />
+            </label>
+
+            <div className="mt-6 flex justify-end gap-2">
+              <Button variant="outline" onClick={closeAddServiceAreaPreset}>
+                Cancel
+              </Button>
+              <Button disabled={!newServiceAreaName.trim()} onClick={() => void saveNewServiceAreaPreset()}>
+                Add Service Area
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

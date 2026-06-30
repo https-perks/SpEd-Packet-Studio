@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from backend.database.session import get_session
 from backend.schemas.projects import (
     AtAGlanceDraft,
+    AppSettings,
     BackupResponse,
     BrandKitLibraryDraft,
     BrandKitLibraryItem,
@@ -28,6 +29,7 @@ from backend.schemas.projects import (
     ProjectDetail,
     ProjectSummary,
     StudentSetupDraft,
+    ThemePaletteDraft,
     ThemeOption,
     ThemeSelection,
 )
@@ -36,9 +38,34 @@ from backend.services import projects
 router = APIRouter(prefix="/projects", tags=["projects"])
 
 
+@router.get("/app-settings", response_model=AppSettings)
+def get_app_settings() -> AppSettings:
+    return projects.get_app_settings()
+
+
+@router.put("/app-settings", response_model=AppSettings)
+def save_app_settings(value: AppSettings) -> AppSettings:
+    return projects.save_app_settings(value)
+
+
 @router.get("/themes", response_model=list[ThemeOption])
 def list_themes() -> list[ThemeOption]:
     return projects.list_themes()
+
+
+@router.post("/themes", response_model=ThemeOption, status_code=201)
+def create_theme_palette(value: ThemePaletteDraft) -> ThemeOption:
+    return projects.create_theme_palette(value)
+
+
+@router.put("/themes/{theme_id}", response_model=ThemeOption)
+def update_theme_palette(theme_id: str, value: ThemePaletteDraft) -> ThemeOption:
+    return projects.update_theme_palette(theme_id, value)
+
+
+@router.delete("/themes/{theme_id}", status_code=204)
+def delete_theme_palette(theme_id: str) -> None:
+    projects.delete_theme_palette(theme_id)
 
 
 @router.get("/packet-templates", response_model=list[PacketTemplateOption])

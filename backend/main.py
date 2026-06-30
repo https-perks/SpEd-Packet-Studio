@@ -21,7 +21,7 @@ app.add_middleware(
         "tauri://localhost",
     ],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Accept", "Content-Type"],
 )
 app.include_router(api_router, prefix=f"/api/v{settings.api_version}")

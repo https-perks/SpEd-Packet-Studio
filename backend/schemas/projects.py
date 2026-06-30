@@ -258,6 +258,7 @@ class ThemeOption(ApiSchema):
     description: str
     category: str = "Built-in"
     default_customization: dict[str, object] = Field(default_factory=dict)
+    is_builtin: bool = True
 
 
 class PacketTemplateOption(ApiSchema):
@@ -280,6 +281,13 @@ class ThemeCustomization(ApiSchema):
     service_area_colors: dict[str, str] = Field(default_factory=dict)
 
 
+class ThemePaletteDraft(ApiSchema):
+    name: str = Field(default="", max_length=160)
+    description: str = Field(default="", max_length=400)
+    category: str = Field(default="Custom", max_length=120)
+    customization: ThemeCustomization = Field(default_factory=ThemeCustomization)
+
+
 class BrandKit(ApiSchema):
     id: str = Field(default="personal", max_length=80)
     name: str = Field(default="Personal Brand Kit", max_length=160)
@@ -289,6 +297,8 @@ class BrandKit(ApiSchema):
     school_logo_label: str = Field(default="", max_length=200)
     logo_relative_path: str = Field(default="", max_length=1024)
     logo_filename: str = Field(default="", max_length=255)
+    watermark_logo_relative_path: str = Field(default="", max_length=1024)
+    watermark_logo_filename: str = Field(default="", max_length=255)
     watermark_enabled: bool = False
     default_fonts: str = Field(default="", max_length=200)
     primary_color: str = Field(default="#0f2d55", max_length=24)
@@ -353,6 +363,8 @@ class BrandKitLibraryDraft(ApiSchema):
     school_logo_label: str = Field(default="", max_length=200)
     logo_relative_path: str = Field(default="", max_length=1024)
     logo_filename: str = Field(default="", max_length=255)
+    watermark_logo_relative_path: str = Field(default="", max_length=1024)
+    watermark_logo_filename: str = Field(default="", max_length=255)
     watermark_enabled: bool = False
     default_fonts: str = Field(default="", max_length=200)
     primary_color: str = Field(default="#0f2d55", max_length=24)
@@ -365,6 +377,7 @@ class BrandKitLibraryDraft(ApiSchema):
 
 class BrandKitLogoUpload(BrandLogoUpload):
     brand_kit_id: str = Field(max_length=80)
+    logo_kind: Literal["cover", "watermark"] = "cover"
 
 
 class ExportSettingsSelection(ApiSchema):
@@ -373,6 +386,27 @@ class ExportSettingsSelection(ApiSchema):
 
 class ObservationChecklistDraft(ApiSchema):
     items: list[str] = Field(default_factory=list)
+
+
+class CaseManagerProfile(ApiSchema):
+    first_name: str = Field(default="", max_length=100)
+    last_name: str = Field(default="", max_length=100)
+    phone: str = Field(default="", max_length=80)
+    email: str = Field(default="", max_length=200)
+    school: str = Field(default="", max_length=200)
+    notes: str = Field(default="", max_length=1000)
+
+
+class AppSettings(ApiSchema):
+    default_school_year: str = Field(default="", max_length=20)
+    default_theme_id: str = Field(default="teacher_friendly", max_length=80)
+    default_packet_template_id: str = Field(default="modern_professional", max_length=80)
+    default_export_settings: ExportSettings = Field(default_factory=ExportSettings)
+    default_packet_pages: list[PacketPageDraft] = Field(default_factory=list)
+    default_observation_checklist: list[str] = Field(default_factory=list)
+    default_data_sheet_columns: list[DataSheetColumnDraft] = Field(default_factory=list)
+    service_area_presets: list[ServiceAreaDraft] = Field(default_factory=list)
+    case_manager_profile: CaseManagerProfile = Field(default_factory=CaseManagerProfile)
 
 
 class BackupResponse(ApiSchema):

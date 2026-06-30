@@ -160,6 +160,7 @@ export interface ThemeOption {
   readonly description: string;
   readonly category: string;
   readonly default_customization: Partial<ThemeCustomization>;
+  readonly is_builtin: boolean;
 }
 
 export interface PacketTemplateOption {
@@ -199,6 +200,13 @@ export interface ThemeCustomization {
   service_area_colors: Record<string, string>;
 }
 
+export interface ThemePaletteDraft {
+  name: string;
+  description: string;
+  category: string;
+  customization: ThemeCustomization;
+}
+
 export interface BrandKit {
   id: string;
   name: string;
@@ -208,6 +216,8 @@ export interface BrandKit {
   school_logo_label: string;
   logo_relative_path: string;
   logo_filename: string;
+  watermark_logo_relative_path: string;
+  watermark_logo_filename: string;
   watermark_enabled: boolean;
   default_fonts: string;
   primary_color: string;
@@ -230,6 +240,8 @@ export interface BrandKitLibraryDraft {
   school_logo_label: string;
   logo_relative_path: string;
   logo_filename: string;
+  watermark_logo_relative_path: string;
+  watermark_logo_filename: string;
   watermark_enabled: boolean;
   default_fonts: string;
   primary_color: string;
@@ -244,6 +256,27 @@ export interface ExportSettings {
   filename_template: string;
   last_export_location: string;
   export_mode: ExportMode;
+}
+
+export interface CaseManagerProfile {
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email: string;
+  school: string;
+  notes: string;
+}
+
+export interface AppSettings {
+  default_school_year: string;
+  default_theme_id: string;
+  default_packet_template_id: string;
+  default_export_settings: ExportSettings;
+  default_packet_pages: PacketPageDraft[];
+  default_observation_checklist: string[];
+  default_data_sheet_columns: DataSheetColumnDraft[];
+  service_area_presets: ServiceAreaDraft[];
+  case_manager_profile: CaseManagerProfile;
 }
 
 export interface DuplicateOptions {
