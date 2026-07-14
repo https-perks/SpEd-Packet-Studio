@@ -6,41 +6,59 @@ A local-first desktop publishing application for special education service packe
 
 Tauri desktop shell -> React and TypeScript presentation -> local FastAPI business layer -> SQLAlchemy ORM -> SQLite persistence -> WeasyPrint export engine.
 
-## Version 1.5 scope
+## Version 1.6 scope
 
-Version 1.5 begins the productivity and personalization expansion while keeping
-the Version 1 guided workflow intact. The focus is reducing repetitive work
-without turning the app into a freeform page editor.
+Version 1.6 continues the productivity and personalization expansion while
+preserving the guided Version 1 workflow. The emphasis is now on reusable
+settings, cleaner export behavior, and packet content that is easier for staff
+to scan.
 
-Included in the current 1.5 foundation:
+Included in the current 1.6 build:
 
 - Dashboard advanced filters for grade, school year, case manager, service area,
   and projects missing data sheets
 - Multi-project selection with bulk archive, restore, duplicate, export, rename,
   and delete actions
-- Dedicated archive cleanup through permanent delete after a project has already
-  been archived, including selected-project cleanup in Archive view
+- Dedicated Archive view with restore, duplicate, export, rename, and permanent
+  delete support
 - Duplicate wizard options for choosing which project sections carry forward
-- Template library preview for built-in packet templates
-- Additional built-in packet templates: Modern Professional, Elementary
-  Friendly, Minimal, District Branding, and Contemporary
-- Theme gallery metadata with Elementary Friendly and Minimal theme additions
-- Theme color customization for primary, secondary, accent, background, card,
-  text, and service-area colors in the packet rendering layer
-- Brand Kit fields and local logo upload support in the packet rendering layer
-- Export settings for plain custom filenames, export mode, and selected save
-  folder
-- Native Windows folder picker support for export destinations
-- ZIP archive export for all packet versions
+- Packet template library with preview, edit, hide/restore for built-in
+  templates, and custom template support
+- Focused packet templates, including Modern Professional, District Branding,
+  Mountain Illustrated, and other designed packet layouts
+- Template-specific PDF styling so cover, section headers, cards, service icons,
+  and data pages share a cohesive visual language
+- Theme palette management with editable colors, including service-area icon
+  colors for goal summary, service information, and data collection pages
+- Brand Kit management with cover logo upload, watermark logo upload, font
+  selection, footer text, and optional application during export
+- Service-area icon support using local SVG assets, with fallback icons when a
+  service area has no matching asset
+- Student Setup support pages for structured accommodations/modifications and
+  structured behavior-plan sections
+- Related service provider management from the Case Manager card, with provider
+  contacts included in the Service Information page
+- Observation Sheets as a separate workflow from goal data collection, including
+  custom observation tables and customizable "Things Staff Need To Tell..."
+  checklist items
+- Data Sheet Template settings with a reusable template library, editable table
+  columns, left/right column ordering, collection type, and staff notes
+- Data Sheet Builder template application, goal linking, local column editing,
+  collection schedule, packet table count, and notes for staff
+- Packet Designer per-version page visibility and pointer-based page ordering
+- Empty accommodations and behavior pages are skipped from Packet Designer and
+  generated exports until content exists
+- Review & Export with PDF preview, single PDF export, ZIP archive export for all
+  versions, and a native Windows Save As flow for file name and location
+- Local JSON backup support
 
-Still planned for later 1.5 passes:
+Still planned for later versions:
 
-- Dashboard-level Brand Kit library management
-- Dashboard-level template editing and user-created templates
 - Template import/export and sharing
-- Full template create/rename/archive/delete management
-- Template thumbnails and larger template library management
-- Thumbnail caching and deeper performance work
+- Template thumbnail caching and deeper performance work
+- Uploaded asset placement in a future visual page editor
+- Manual data table column width control
+- Canva-style granular page editing
 
 ## Version 1.0 scope
 
@@ -84,10 +102,11 @@ Builder without duplicating goal language.
 Generated PDFs are stored locally under the application data exports folder.
 Project backups are stored locally as JSON.
 
-Accommodations/modifications, behavior-plan editing, uploaded visual assets, and
-Canva-style granular page editing are intentionally post-1.0 editor features.
-The current Packet Designer stores page visibility/order and applies the selected
-theme, but does not yet provide freeform layout editing.
+Accommodations/modifications and behavior plans are now structured Student Setup
+content. Uploaded visual assets and Canva-style granular page editing remain
+future editor features. The current Packet Designer stores page visibility/order
+and applies the selected template/theme, but does not yet provide freeform layout
+editing.
 
 ## Development
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
-import { TextInput } from "../components/ui/FormField";
+import { TextArea, TextInput } from "../components/ui/FormField";
 import {
   applyBulkProjectAction,
   archiveProject,
@@ -16,12 +16,14 @@ import {
   getAppSettings,
   duplicateBrandKit,
   duplicateProject,
-  duplicateTemplateLibraryItem,
   listBrandKits,
+  listHiddenTemplateLibrary,
   listPacketTemplates,
   listProjects,
   listTemplateLibrary,
   listThemes,
+  previewTemplateLibraryItem,
+  restoreTemplateLibraryItem,
   restoreProject,
   saveAppSettings,
   setDefaultBrandKit,
@@ -35,6 +37,8 @@ import type {
   AppSettings,
   BrandKitLibraryDraft,
   BrandKitLibraryItem,
+  DataSheetColumnType,
+  DataSheetDraft,
   DuplicateOptions,
   PacketTemplateLibraryDraft,
   PacketTemplateLibraryItem,
@@ -51,7 +55,7 @@ type SettingsModal =
   | "export"
   | "packet_pages"
   | "observation_checklist"
-  | "data_columns"
+  | "data_sheet_templates"
   | "service_presets"
   | "case_manager"
   | null;
@@ -98,8 +102,83 @@ const defaultCustomization: ThemeCustomization = {
   background_color: "#f3f7fc",
   card_color: "#ffffff",
   text_color: "#12213a",
-  service_area_colors: {},
+  service_area_colors: {
+    Math: "#22C55E",
+    Reading: "#2563EB",
+    "Written Expression": "#8B5CF6",
+    "S/E/B": "#F59E0B",
+    "SH/I": "#E11D48",
+    Communication: "#06B6D4",
+    "Speech/Language": "#6366F1",
+  },
 };
+
+const defaultServiceAreaColors = defaultCustomization.service_area_colors;
+const minimalServiceAreaColor = "#4B5563";
+const serviceAreaColorLabels: Record<string, string> = {
+  "S/E/B": "S/E/B",
+  "SH/I": "Self-Help/Indep.",
+  "Speech/Language": "Speech/Language",
+};
+
+function normalizeServiceAreaColors(colors: Record<string, string> = {}) {
+  const normalized = { ...colors };
+  if (normalized["Speech-Language"] && !normalized["Speech/Language"]) {
+    normalized["Speech/Language"] = normalized["Speech-Language"];
+  }
+  if (normalized["Social/Emotional/Behavioral"] && !normalized["S/E/B"]) {
+    normalized["S/E/B"] = normalized["Social/Emotional/Behavioral"];
+  }
+  if (normalized["Self-Help/Independence"] && !normalized["SH/I"]) {
+    normalized["SH/I"] = normalized["Self-Help/Independence"];
+  }
+  delete normalized["Speech-Language"];
+  delete normalized["Social/Emotional/Behavioral"];
+  delete normalized["Self-Help/Independence"];
+  return normalized;
+}
+
+function minimalServiceAreaColors(colors: Record<string, string> = {}) {
+  const keys = new Set([...Object.keys(defaultServiceAreaColors), ...Object.keys(normalizeServiceAreaColors(colors))]);
+  return Object.fromEntries(Array.from(keys).map((key) => [key, minimalServiceAreaColor]));
+}
+
+const fontOptions = ["Open Sans", "Poppins", "Segoe UI", "Arial", "Georgia", "Times New Roman"];
+const dataSheetColumnTypes: readonly { value: DataSheetColumnType; label: string }[] = [
+  { value: "text", label: "Text" },
+  { value: "number", label: "Number" },
+  { value: "date", label: "Date" },
+  { value: "checkbox", label: "Checkbox" },
+  { value: "notes", label: "Notes" },
+];
+const dataSheetTypes = [
+  { value: "trial_count", label: "Trial count" },
+  { value: "frequency", label: "Frequency" },
+  { value: "duration", label: "Duration" },
+  { value: "rubric", label: "Rubric" },
+  { value: "notes", label: "Notes" },
+] as const;
+
+function blankDataSheetTemplate(position: number): DataSheetDraft {
+  return {
+    id: `template_${Date.now()}`,
+    title: "New Data Sheet Template",
+    sheet_type: "trial_count",
+    goal_ids: [],
+    collection_schedule: "Weekly",
+    blank_instance_count: 1,
+    columns: [
+      { id: `column_${Date.now()}_date`, title: "Date", column_type: "date", position: 0 },
+      { id: `column_${Date.now()}_result`, title: "Result", column_type: "text", position: 1 },
+      { id: `column_${Date.now()}_notes`, title: "Notes", column_type: "notes", position: 2 },
+    ],
+    notes: "",
+    template_name: "New Data Sheet Template",
+    is_template: true,
+    is_observation_form: false,
+    position,
+  };
+}
 
 const defaultAppSettings: AppSettings = {
   default_school_year: "",
@@ -138,6 +217,27 @@ const defaultAppSettings: AppSettings = {
     { id: "result", title: "Result", column_type: "text", position: 2 },
     { id: "notes", title: "Notes", column_type: "notes", position: 3 },
   ],
+  data_sheet_templates: [
+    {
+      id: "template_trial_probe",
+      title: "Skill Probe",
+      sheet_type: "trial_count",
+      goal_ids: [],
+      collection_schedule: "Weekly",
+      blank_instance_count: 1,
+      columns: [
+        { id: "date", title: "Date", column_type: "date", position: 0 },
+        { id: "trial", title: "Trial", column_type: "text", position: 1 },
+        { id: "result", title: "Result", column_type: "text", position: 2 },
+        { id: "notes", title: "Notes", column_type: "notes", position: 3 },
+      ],
+      notes: "Use one row per probe or trial.",
+      template_name: "Skill Probe",
+      is_template: true,
+      is_observation_form: false,
+      position: 0,
+    },
+  ],
   service_area_presets: [],
   case_manager_profile: {
     first_name: "",
@@ -156,7 +256,7 @@ const districtBrandingCustomization: ThemeCustomization = {
   background_color: "#ffffff",
   card_color: "#ffffff",
   text_color: "#14233c",
-  service_area_colors: {},
+  service_area_colors: defaultServiceAreaColors,
 };
 
 function themeIdForItem(item?: PacketTemplateLibraryItem) {
@@ -170,7 +270,18 @@ function customizationForPalette(themeId: string, current?: Partial<ThemeCustomi
   const base = themeId === "district_colors"
     ? districtBrandingCustomization
     : { ...defaultCustomization, ...(current ?? {}) };
-  return { ...base, ...(current ?? {}), service_area_colors: current?.service_area_colors ?? base.service_area_colors ?? {} };
+  const serviceAreaColors = themeId === "minimal"
+    ? minimalServiceAreaColors(current?.service_area_colors ?? base.service_area_colors ?? {})
+    : {
+      ...defaultServiceAreaColors,
+      ...normalizeServiceAreaColors(base.service_area_colors ?? {}),
+      ...normalizeServiceAreaColors(current?.service_area_colors ?? {}),
+    };
+  return {
+    ...base,
+    ...(current ?? {}),
+    service_area_colors: serviceAreaColors,
+  };
 }
 
 function paletteDraftFromTheme(theme?: ThemeOption, customization: ThemeCustomization = defaultCustomization): ThemePaletteDraft {
@@ -180,6 +291,36 @@ function paletteDraftFromTheme(theme?: ThemeOption, customization: ThemeCustomiz
     category: theme?.category ?? "Custom",
     customization,
   };
+}
+
+function uniqueServiceColorNames(serviceAreaPresets: AppSettings["service_area_presets"]) {
+  const names = new Set<string>();
+  serviceAreaPresets.forEach((area) => {
+    const key = serviceAreaColorKey(area.name);
+    if (key) names.add(key);
+  });
+  return Array.from(names).sort((first, second) => serviceAreaColorLabel(first).localeCompare(serviceAreaColorLabel(second)));
+}
+
+function defaultColorForServiceArea(name: string) {
+  return defaultServiceAreaColors[serviceAreaColorKey(name) || name] ?? "#2563EB";
+}
+
+function serviceAreaColorLabel(name: string) {
+  return serviceAreaColorLabels[name] ?? name;
+}
+
+function serviceAreaColorKey(name: string) {
+  const lowered = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (!lowered) return "";
+  if (lowered.includes("math")) return "Math";
+  if (lowered.includes("read")) return "Reading";
+  if (lowered.includes("written") || lowered.includes("writing") || lowered.includes("expression")) return "Written Expression";
+  if (lowered.includes("social") || lowered.includes("emotional") || lowered.includes("behavior") || lowered === "s e b" || lowered === "seb") return "S/E/B";
+  if (lowered.includes("self") || lowered.includes("independence") || lowered.includes("independent") || lowered === "sh i" || lowered === "shi") return "SH/I";
+  if (lowered.includes("communication")) return "Communication";
+  if (lowered.includes("speech") || lowered.includes("language")) return "Speech/Language";
+  return name.trim();
 }
 
 function templateDraftFromItem(item?: PacketTemplateLibraryItem): PacketTemplateLibraryDraft {
@@ -209,6 +350,8 @@ function brandKitDraftFromItem(item?: BrandKitLibraryItem): BrandKitLibraryDraft
     watermark_logo_filename: item?.watermark_logo_filename ?? "",
     watermark_enabled: item?.watermark_enabled ?? false,
     default_fonts: item?.default_fonts ?? "Open Sans",
+    heading_font: item?.heading_font || item?.default_fonts || "Poppins",
+    body_font: item?.body_font || item?.default_fonts || "Open Sans",
     primary_color: item?.primary_color ?? "#0f2d55",
     secondary_color: item?.secondary_color ?? "#27b8b2",
     accent_color: item?.accent_color ?? "#ef7900",
@@ -242,7 +385,7 @@ const basePreviewTone: Record<string, { panel: string; accent: string; mode: "li
   purple_dot: { panel: "radial-gradient(circle, rgba(126,87,194,.38) 0 2px, transparent 2px) right center / 15px 15px, linear-gradient(90deg, #ffffff 0 64%, #f3e8ff 64%)", accent: "#6d3fc0", mode: "light", label: "Editorial" },
 };
 
-function TemplateLivePreview({
+export function TemplateLivePreview({
   draft,
   baseTemplate,
 }: {
@@ -361,6 +504,56 @@ function TemplateLivePreview({
   );
 }
 
+function TemplatePdfPreview({
+  title,
+  previewUrl,
+  loading,
+  error,
+  dirty,
+  onUpdate,
+}: {
+  readonly title: string;
+  readonly previewUrl: string;
+  readonly loading: boolean;
+  readonly error: string;
+  readonly dirty: boolean;
+  readonly onUpdate: () => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-surface-muted)] p-4">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--theme-accent)]">Sample Packet Preview</p>
+          <h3 className="text-lg font-semibold text-[var(--theme-primary)]">{title}</h3>
+          <p className="mt-1 text-sm text-[var(--theme-text-muted)]">
+            Preview uses sample student data and updates only when you click Update Preview.
+          </p>
+        </div>
+        <Button disabled={loading} onClick={onUpdate}>
+          {loading ? "Updating..." : dirty ? "Update Preview" : "Refresh Preview"}
+        </Button>
+      </div>
+      {error && (
+        <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+      <div className="h-[72vh] min-h-[36rem] overflow-hidden rounded-xl border border-[var(--theme-border)] bg-white shadow-inner">
+        {previewUrl ? (
+          <iframe className="h-full w-full" src={previewUrl} title={`${title} sample packet preview`} />
+        ) : (
+          <div className="grid h-full place-items-center p-8 text-center text-sm text-[var(--theme-text-muted)]">
+            <div>
+              <p className="font-semibold text-[var(--theme-text)]">No preview generated yet.</p>
+              <p className="mt-2">Click Update Preview to render a sample packet with this template.</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 interface DashboardPageProps {
   readonly notice?: string;
   readonly onOpen: (project: ProjectSummary | ProjectDetail) => void;
@@ -376,15 +569,24 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
   const [missingDataSheets, setMissingDataSheets] = useState(false);
   const [packetTemplates, setPacketTemplates] = useState<PacketTemplateOption[]>([]);
   const [templateLibrary, setTemplateLibrary] = useState<PacketTemplateLibraryItem[]>([]);
+  const [hiddenTemplateLibrary, setHiddenTemplateLibrary] = useState<PacketTemplateLibraryItem[]>([]);
   const [themes, setThemes] = useState<ThemeOption[]>([]);
   const [brandKits, setBrandKits] = useState<BrandKitLibraryItem[]>([]);
   const [appSettings, setAppSettings] = useState<AppSettings>(defaultAppSettings);
   const [settingsModal, setSettingsModal] = useState<SettingsModal>(null);
+  const [selectedDataSheetTemplateIndex, setSelectedDataSheetTemplateIndex] = useState(0);
   const [selectedTemplate, setSelectedTemplate] = useState<PacketTemplateLibraryItem | null>(null);
   const [templateDraft, setTemplateDraft] = useState<PacketTemplateLibraryDraft>(templateDraftFromItem());
   const [paletteDraft, setPaletteDraft] = useState<ThemePaletteDraft>(paletteDraftFromTheme(undefined, templateDraftFromItem().customization));
   const [editingTemplate, setEditingTemplate] = useState(false);
-  const [hoveredBaseTemplateId, setHoveredBaseTemplateId] = useState<string | null>(null);
+  const [previewingTemplate, setPreviewingTemplate] = useState<PacketTemplateLibraryItem | null>(null);
+  const [templatePreviewUrl, setTemplatePreviewUrl] = useState("");
+  const [templatePreviewLoading, setTemplatePreviewLoading] = useState(false);
+  const [templatePreviewError, setTemplatePreviewError] = useState("");
+  const [templatePreviewDirty, setTemplatePreviewDirty] = useState(true);
+  const [templateDeleteTarget, setTemplateDeleteTarget] = useState<PacketTemplateLibraryItem | null>(null);
+  const [hiddenTemplatesOpen, setHiddenTemplatesOpen] = useState(false);
+  const [selectedHiddenTemplate, setSelectedHiddenTemplate] = useState<PacketTemplateLibraryItem | null>(null);
   const [selectedBrandKit, setSelectedBrandKit] = useState<BrandKitLibraryItem | null>(null);
   const [brandKitDraft, setBrandKitDraft] = useState<BrandKitLibraryDraft>(brandKitDraftFromItem());
   const [editingBrandKit, setEditingBrandKit] = useState(false);
@@ -396,8 +598,6 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const baseTemplates = packetTemplates.filter((template) => !template.id.startsWith("custom_"));
-  const previewBaseTemplate = baseTemplates.find((template) => template.id === (hoveredBaseTemplateId ?? templateDraft.base_template_id))
-    ?? baseTemplates.find((template) => template.id === "modern_professional");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -428,10 +628,17 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
   useEffect(() => {
     void listPacketTemplates().then(setPacketTemplates).catch(() => setPacketTemplates([]));
     void listTemplateLibrary().then(setTemplateLibrary).catch(() => setTemplateLibrary([]));
+    void listHiddenTemplateLibrary().then(setHiddenTemplateLibrary).catch(() => setHiddenTemplateLibrary([]));
     void listThemes().then(setThemes).catch(() => setThemes([]));
     void listBrandKits().then(setBrandKits).catch(() => setBrandKits([]));
     void getAppSettings().then(setAppSettings).catch(() => setAppSettings(defaultAppSettings));
   }, []);
+
+  useEffect(() => () => {
+    if (templatePreviewUrl) {
+      URL.revokeObjectURL(templatePreviewUrl);
+    }
+  }, [templatePreviewUrl]);
 
   async function handleCreate() {
     setError("");
@@ -527,6 +734,7 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
 
   async function refreshTemplateLibrary() {
     setTemplateLibrary(await listTemplateLibrary());
+    setHiddenTemplateLibrary(await listHiddenTemplateLibrary());
     setPacketTemplates(await listPacketTemplates());
   }
 
@@ -568,8 +776,55 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
     setTemplateDraft(draft);
     const theme = themes.find((candidate) => candidate.id === draft.theme_id);
     setPaletteDraft(paletteDraftFromTheme(theme, draft.customization));
-    setHoveredBaseTemplateId(null);
+    setTemplatePreviewError("");
+    setTemplatePreviewDirty(true);
     setEditingTemplate(true);
+  }
+
+  function updateTemplateDraft(next: PacketTemplateLibraryDraft) {
+    setTemplateDraft(next);
+    setTemplatePreviewDirty(true);
+  }
+
+  function updateServiceAreaColor(serviceArea: string, color: string) {
+    const customization = {
+      ...templateDraft.customization,
+      service_area_colors: {
+        ...defaultServiceAreaColors,
+        ...templateDraft.customization.service_area_colors,
+        [serviceArea]: color,
+      },
+    };
+    updateTemplateDraft({ ...templateDraft, customization });
+    setPaletteDraft({ ...paletteDraft, customization });
+  }
+
+  async function updateTemplatePreview(draft: PacketTemplateLibraryDraft = templateDraft) {
+    setTemplatePreviewLoading(true);
+    setTemplatePreviewError("");
+    try {
+      const blob = await previewTemplateLibraryItem(draft);
+      const nextUrl = URL.createObjectURL(blob);
+      setTemplatePreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return nextUrl;
+      });
+      setTemplatePreviewDirty(false);
+    } catch (reason) {
+      setTemplatePreviewError(reason instanceof Error ? reason.message : "Template preview could not be created.");
+    } finally {
+      setTemplatePreviewLoading(false);
+    }
+  }
+
+  function openTemplatePreview(template: PacketTemplateLibraryItem) {
+    setSelectedTemplate(template);
+    setPreviewingTemplate(template);
+    const draft = templateDraftFromItem(template);
+    setTemplateDraft(draft);
+    setPaletteDraft(paletteDraftFromTheme(themes.find((theme) => theme.id === draft.theme_id), draft.customization));
+    setTemplatePreviewDirty(true);
+    void updateTemplatePreview(draft);
   }
 
   async function savePaletteEditor() {
@@ -583,11 +838,11 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
       await refreshThemes();
       const customization = customizationForPalette(saved.id, saved.default_customization);
       setPaletteDraft(paletteDraftFromTheme(saved, customization));
-      setTemplateDraft({
-        ...templateDraft,
-        theme_id: saved.id,
-        customization,
-      });
+        updateTemplateDraft({
+          ...templateDraft,
+          theme_id: saved.id,
+          customization,
+        });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Palette could not be saved.");
     }
@@ -613,7 +868,7 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
       await refreshThemes();
       const customization = customizationForPalette(saved.id, saved.default_customization);
       setPaletteDraft(paletteDraftFromTheme(saved, customization));
-      setTemplateDraft({
+      updateTemplateDraft({
         ...templateDraft,
         theme_id: saved.id,
         customization,
@@ -635,7 +890,7 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
       const fallback = nextThemes.some((theme) => theme.id === preferredFallback) ? preferredFallback : "minimal";
       const fallbackTheme = nextThemes.find((theme) => theme.id === fallback);
       const customization = customizationForPalette(fallback, fallbackTheme?.default_customization ?? templateDraft.customization);
-      setTemplateDraft({
+      updateTemplateDraft({
         ...templateDraft,
         theme_id: fallback,
         customization,
@@ -662,29 +917,66 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
     }
   }
 
-  async function duplicateSelectedTemplate() {
-    if (!selectedTemplate) return;
+  async function deleteSelectedTemplate(target = selectedTemplate) {
+    if (!target) return;
     setError("");
     try {
-      const duplicate = await duplicateTemplateLibraryItem(selectedTemplate.id);
-      setSelectedTemplate(duplicate);
-      await refreshTemplateLibrary();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Template could not be duplicated.");
-    }
-  }
-
-  async function deleteSelectedTemplate() {
-    if (!selectedTemplate) return;
-    if (!window.confirm(`Delete "${selectedTemplate.name}"?`)) return;
-    setError("");
-    try {
-      await deleteTemplateLibraryItem(selectedTemplate.id);
+      await deleteTemplateLibraryItem(target.id);
       setSelectedTemplate(null);
+      setTemplateDeleteTarget(null);
       await refreshTemplateLibrary();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Template could not be deleted.");
     }
+  }
+
+  async function openHiddenTemplates() {
+    setError("");
+    try {
+      const hidden = await listHiddenTemplateLibrary();
+      setHiddenTemplateLibrary(hidden);
+      const first = hidden[0] ?? null;
+      setSelectedHiddenTemplate(first);
+      setHiddenTemplatesOpen(true);
+      if (first) {
+        openTemplatePreview(first);
+        setPreviewingTemplate(null);
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Hidden templates could not be loaded.");
+    }
+  }
+
+  async function restoreHiddenTemplate(template: PacketTemplateLibraryItem) {
+    setError("");
+    try {
+      await restoreTemplateLibraryItem(template.id);
+      await refreshTemplateLibrary();
+      const hidden = await listHiddenTemplateLibrary();
+      setHiddenTemplateLibrary(hidden);
+      const next = hidden.find((item) => item.id !== template.id) ?? hidden[0] ?? null;
+      setSelectedHiddenTemplate(next);
+      if (next) {
+        const draft = templateDraftFromItem(next);
+        setTemplateDraft(draft);
+        setPaletteDraft(paletteDraftFromTheme(themes.find((theme) => theme.id === draft.theme_id), draft.customization));
+        setTemplatePreviewDirty(true);
+        void updateTemplatePreview(draft);
+      } else {
+        setHiddenTemplatesOpen(false);
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Template could not be restored.");
+    }
+  }
+
+  function selectHiddenTemplate(template: PacketTemplateLibraryItem) {
+    setSelectedHiddenTemplate(template);
+    const draft = templateDraftFromItem(template);
+    setTemplateDraft(draft);
+    setPaletteDraft(paletteDraftFromTheme(themes.find((theme) => theme.id === draft.theme_id), draft.customization));
+    setTemplatePreviewDirty(true);
+    void updateTemplatePreview(draft);
   }
 
   async function setSelectedTemplateDefault() {
@@ -981,12 +1273,12 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
           {selectedTemplate && (
             <div className="mb-3 flex flex-wrap gap-2 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-primary-soft)] p-3">
               <Button variant="outline" onClick={() => openTemplateEditor(selectedTemplate)}>Edit Template</Button>
-              <Button variant="outline" onClick={() => void duplicateSelectedTemplate()}>Duplicate Template</Button>
+              <Button variant="outline" onClick={() => openTemplatePreview(selectedTemplate)}>Preview Template</Button>
               <Button variant="outline" onClick={() => void setSelectedTemplateDefault()}>Set Default Template</Button>
-              {!selectedTemplate.is_builtin && <Button variant="text" onClick={() => void deleteSelectedTemplate()}>Delete Template</Button>}
+              <Button variant="text" onClick={() => setTemplateDeleteTarget(selectedTemplate)}>Delete Template</Button>
             </div>
           )}
-          <div className="space-y-2 text-sm text-[var(--theme-text-muted)]">
+          <div className="max-h-[28rem] space-y-2 overflow-y-auto pr-1 text-sm text-[var(--theme-text-muted)]">
             {(templateLibrary.length ? templateLibrary : packetTemplates.map((template) => ({
               ...template,
               base_template_id: template.id,
@@ -994,28 +1286,32 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
               customization: defaultCustomization,
               is_builtin: true,
               is_default: false,
-            }))).slice(0, 8).map((template) => (
-              <button
+              is_hidden: false,
+            }))).map((template) => (
+              <div
                 key={template.id}
-                className={`w-full rounded-lg border px-3 py-2 text-left transition ${selectedTemplate?.id === template.id ? "border-[var(--theme-primary)] bg-[var(--theme-primary-soft)]" : "border-[var(--theme-border)] bg-white hover:bg-[var(--theme-surface-muted)]"}`}
-                onClick={() => setSelectedTemplate(template)}
+                className={`rounded-lg border px-3 py-2 transition ${selectedTemplate?.id === template.id ? "border-[var(--theme-primary)] bg-[var(--theme-primary-soft)]" : "border-[var(--theme-border)] bg-white hover:bg-[var(--theme-surface-muted)]"}`}
               >
-                <span className="font-semibold text-[var(--theme-text)]">{template.name}</span>
-                {template.is_default && <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-[var(--theme-primary)]">Default</span>}
-                <span className="ml-2 text-xs uppercase tracking-[0.12em]">{template.category}</span>
-                <span className="mt-1 block text-xs">{template.description}</span>
-              </button>
+                <button className="w-full text-left" onClick={() => setSelectedTemplate(template)} type="button">
+                  <span className="font-semibold text-[var(--theme-text)]">{template.name}</span>
+                  {template.is_default && <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-[var(--theme-primary)]">Default</span>}
+                  <span className="ml-2 text-xs uppercase tracking-[0.12em]">{template.category}</span>
+                  <span className="mt-1 block text-xs">{template.description}</span>
+                </button>
+                {selectedTemplate?.id === template.id && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button variant="outline" onClick={() => openTemplateEditor(template)}>Edit</Button>
+                    <Button variant="outline" onClick={() => openTemplatePreview(template)}>Preview</Button>
+                    <Button variant="text" onClick={() => setTemplateDeleteTarget(template)}>Delete</Button>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         </Card>
         <Card
           title="Application settings"
           description="Manage local defaults used across packet projects."
-          actions={<Button variant="outline" onClick={() => {
-            setSelectedBrandKit(brandKits[0] ?? null);
-            setBrandKitDraft(brandKitDraftFromItem(brandKits[0]));
-            setEditingBrandKit(true);
-          }}>Manage Brand Kits</Button>}
         >
           <div className="grid gap-2 sm:grid-cols-2">
             {([
@@ -1023,7 +1319,7 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
               ["export", "Export Defaults"],
               ["packet_pages", "Default Packet Pages"],
               ["observation_checklist", "Observation Checklist"],
-              ["data_columns", "Data Table Columns"],
+              ["data_sheet_templates", "Data Sheet Templates"],
               ["service_presets", "Service Area Presets"],
               ["case_manager", "Case Manager Profile"],
             ] as const).map(([key, label]) => (
@@ -1031,6 +1327,14 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                 {label}
               </Button>
             ))}
+            <Button variant="outline" onClick={() => openBrandKitEditor(brandKits[0])}>
+              Manage Brand Kits
+            </Button>
+            {hiddenTemplateLibrary.length > 0 && (
+              <Button variant="outline" onClick={() => void openHiddenTemplates()}>
+                Hidden Templates
+              </Button>
+            )}
           </div>
         </Card>
       </div>
@@ -1040,7 +1344,7 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-semibold text-[var(--theme-primary)]">{selectedTemplate ? "Edit Template" : "Create Template"}</h2>
-                <p className="mt-1 text-sm text-[var(--theme-text-muted)]">Templates store layout and colors only, never student information. Hover a base layout to preview it.</p>
+                <p className="mt-1 text-sm text-[var(--theme-text-muted)]">Templates store layout and colors only, never student information. Use Update Preview to render a sample packet with the current template settings.</p>
               </div>
               <Button variant="text" onClick={() => setEditingTemplate(false)}>Close</Button>
             </div>
@@ -1048,55 +1352,16 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
               <div className="space-y-4">
                 <label className="block text-sm font-semibold text-[var(--theme-text)]">
                   Template Name
-                  <TextInput className="mt-2" value={templateDraft.name} onChange={(event) => setTemplateDraft({ ...templateDraft, name: event.target.value })} />
+                  <TextInput className="mt-2" value={templateDraft.name} onChange={(event) => updateTemplateDraft({ ...templateDraft, name: event.target.value })} />
                 </label>
                 <label className="block text-sm font-semibold text-[var(--theme-text)]">
                   Category
-                  <TextInput className="mt-2" value={templateDraft.category} onChange={(event) => setTemplateDraft({ ...templateDraft, category: event.target.value })} />
+                  <TextInput className="mt-2" value={templateDraft.category} onChange={(event) => updateTemplateDraft({ ...templateDraft, category: event.target.value })} />
                 </label>
                 <label className="block text-sm font-semibold text-[var(--theme-text)]">
                   Description
-                  <TextInput className="mt-2" value={templateDraft.description} onChange={(event) => setTemplateDraft({ ...templateDraft, description: event.target.value })} />
+                  <TextInput className="mt-2" value={templateDraft.description} onChange={(event) => updateTemplateDraft({ ...templateDraft, description: event.target.value })} />
                 </label>
-
-                <div>
-                  <p className="text-sm font-semibold text-[var(--theme-text)]">Base Layout</p>
-                  <div className="mt-2 max-h-72 space-y-2 overflow-auto pr-1">
-                    {baseTemplates.map((template) => {
-                      const active = templateDraft.base_template_id === template.id;
-                      const hover = hoveredBaseTemplateId === template.id;
-                      return (
-                        <button
-                          key={template.id}
-                          className={`w-full rounded-xl border px-3 py-2.5 text-left text-sm transition ${active ? "border-[var(--theme-primary)] bg-[var(--theme-primary-soft)]" : hover ? "border-[var(--theme-accent)] bg-amber-50" : "border-[var(--theme-border)] bg-white hover:border-[var(--theme-accent)] hover:bg-amber-50"}`}
-                          onClick={() => {
-                            const preferredThemeId = template.id === "district_branding" ? "district_colors" : templateDraft.theme_id;
-                            const themeId = themes.some((candidate) => candidate.id === preferredThemeId)
-                              ? preferredThemeId
-                              : themes[0]?.id ?? templateDraft.theme_id;
-                            const theme = themes.find((candidate) => candidate.id === themeId);
-                            const customization = template.id === "district_branding" && themeId === "district_colors"
-                              ? customizationForPalette("district_colors", templateDraft.theme_id === "district_colors" ? templateDraft.customization : undefined)
-                              : templateDraft.customization;
-                            setTemplateDraft({
-                              ...templateDraft,
-                              base_template_id: template.id,
-                              theme_id: themeId,
-                              customization,
-                            });
-                            setPaletteDraft(paletteDraftFromTheme(theme, customization));
-                          }}
-                          onMouseEnter={() => setHoveredBaseTemplateId(template.id)}
-                          onMouseLeave={() => setHoveredBaseTemplateId(null)}
-                          type="button"
-                        >
-                          <span className="block font-semibold text-[var(--theme-text)]">{template.name}</span>
-                          <span className="mt-1 block text-xs text-[var(--theme-text-muted)]">{template.cover_style}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
 
                 <label className="block text-sm font-semibold text-[var(--theme-text)]">
                   Color Palette
@@ -1106,7 +1371,7 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                     onChange={(event) => {
                       const theme = themes.find((candidate) => candidate.id === event.target.value);
                       const customization = customizationForPalette(event.target.value, theme?.default_customization ?? templateDraft.customization);
-                      setTemplateDraft({
+                      updateTemplateDraft({
                         ...templateDraft,
                         theme_id: event.target.value,
                         customization,
@@ -1169,16 +1434,50 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                         value={templateDraft.customization[key]}
                         onChange={(event) => {
                           const customization = { ...templateDraft.customization, [key]: event.target.value };
-                          setTemplateDraft({ ...templateDraft, customization });
+                          updateTemplateDraft({ ...templateDraft, customization });
                           setPaletteDraft({ ...paletteDraft, customization });
                         }}
                       />
                     </label>
                   ))}
                 </div>
+
+                <div className="rounded-xl border border-[var(--theme-border)] bg-white p-3">
+                  <p className="text-sm font-semibold text-[var(--theme-text)]">Service Area Icon Colors</p>
+                  <p className="mt-1 text-xs text-[var(--theme-text-muted)]">
+                    Used on goal summary, service information, and data collection pages. Cover icons keep the template cover styling.
+                  </p>
+                  <div className="mt-3 space-y-2">
+                    {uniqueServiceColorNames(appSettings.service_area_presets).length === 0 && (
+                      <p className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface-muted)] px-3 py-2 text-xs text-[var(--theme-text-muted)]">
+                        Add service area options in Settings to customize their icon colors.
+                      </p>
+                    )}
+                    {uniqueServiceColorNames(appSettings.service_area_presets).map((serviceArea) => (
+                        <div key={serviceArea} className="grid gap-2 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface-muted)] p-2 sm:grid-cols-[1fr_4.5rem]">
+                          <div className="flex min-h-10 items-center text-xs font-semibold text-[var(--theme-text)]">{serviceAreaColorLabel(serviceArea)}</div>
+                          <input
+                            aria-label={`${serviceArea} icon color`}
+                            className="h-10 w-full rounded-lg border border-[var(--theme-border)] bg-white p-1"
+                            disabled={templateDraft.theme_id === "minimal"}
+                            type="color"
+                            value={templateDraft.theme_id === "minimal" ? minimalServiceAreaColor : templateDraft.customization.service_area_colors[serviceArea] ?? defaultColorForServiceArea(serviceArea)}
+                            onChange={(event) => updateServiceAreaColor(serviceArea, event.target.value)}
+                          />
+                        </div>
+                    ))}
+                  </div>
+                </div>
               </div>
 
-              <TemplateLivePreview draft={templateDraft} baseTemplate={previewBaseTemplate} />
+              <TemplatePdfPreview
+                dirty={templatePreviewDirty}
+                error={templatePreviewError}
+                loading={templatePreviewLoading}
+                onUpdate={() => void updateTemplatePreview()}
+                previewUrl={templatePreviewUrl}
+                title={templateDraft.name || selectedTemplate?.name || "Template"}
+              />
             </div>
             <div className="mt-6 flex justify-end gap-2">
               <Button variant="outline" onClick={() => setEditingTemplate(false)}>Cancel</Button>
@@ -1187,9 +1486,110 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
           </div>
         </div>
       )}
+      {previewingTemplate && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-6">
+          <div className="max-h-[92vh] w-full max-w-6xl overflow-auto rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-semibold text-[var(--theme-primary)]">Preview Template</h2>
+                <p className="mt-1 text-sm text-[var(--theme-text-muted)]">{previewingTemplate.name} with sample packet data.</p>
+              </div>
+              <Button variant="text" onClick={() => setPreviewingTemplate(null)}>Close</Button>
+            </div>
+            <TemplatePdfPreview
+              dirty={templatePreviewDirty}
+              error={templatePreviewError}
+              loading={templatePreviewLoading}
+              onUpdate={() => void updateTemplatePreview(templateDraftFromItem(previewingTemplate))}
+              previewUrl={templatePreviewUrl}
+              title={previewingTemplate.name}
+            />
+          </div>
+        </div>
+      )}
+      {templateDeleteTarget && (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/50 p-6">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-red-600">{templateDeleteTarget.is_builtin ? "Hide Template" : "Delete Template"}</p>
+            <h2 className="mt-2 text-2xl font-semibold text-[var(--theme-primary)]">{templateDeleteTarget.name}</h2>
+            <p className="mt-3 text-sm leading-6 text-[var(--theme-text-muted)]">
+              {templateDeleteTarget.is_builtin
+                ? "This hides the built-in template from your dashboard and export choices. Existing projects keep their saved packet settings, and you can restore the template later from Hidden Templates."
+                : "This removes the custom template from the dashboard library. Existing projects keep their saved packet settings, but this template will no longer be available for new previews or exports."}
+            </p>
+            {templateDeleteTarget.is_builtin && (
+              <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+                The template code stays in the app. This only removes the template from your visible library.
+              </div>
+            )}
+            <div className="mt-6 flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setTemplateDeleteTarget(null)}>Cancel</Button>
+              <Button
+                variant="text"
+                onClick={() => {
+                  void deleteSelectedTemplate(templateDeleteTarget);
+                }}
+              >
+                {templateDeleteTarget.is_builtin ? "Hide Template" : "Delete Template"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+      {hiddenTemplatesOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-6">
+          <div className="max-h-[92vh] w-full max-w-6xl overflow-auto rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-semibold text-[var(--theme-primary)]">Hidden Templates</h2>
+                <p className="mt-1 text-sm text-[var(--theme-text-muted)]">
+                  Restore built-in templates you have hidden from the dashboard and export choices.
+                </p>
+              </div>
+              <Button variant="text" onClick={() => setHiddenTemplatesOpen(false)}>Close</Button>
+            </div>
+
+            {hiddenTemplateLibrary.length === 0 ? (
+              <div className="mt-5 rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-surface-muted)] p-6 text-sm text-[var(--theme-text-muted)]">
+                No templates are hidden right now.
+              </div>
+            ) : (
+              <div className="mt-5 grid gap-6 lg:grid-cols-[18rem_1fr]">
+                <div className="max-h-[36rem] space-y-2 overflow-y-auto pr-1">
+                  {hiddenTemplateLibrary.map((template) => (
+                    <button
+                      key={template.id}
+                      className={`w-full rounded-xl border px-3 py-2.5 text-left text-sm transition ${selectedHiddenTemplate?.id === template.id ? "border-[var(--theme-primary)] bg-[var(--theme-primary-soft)]" : "border-[var(--theme-border)] bg-white hover:bg-[var(--theme-surface-muted)]"}`}
+                      onClick={() => selectHiddenTemplate(template)}
+                      type="button"
+                    >
+                      <span className="block font-semibold text-[var(--theme-text)]">{template.name}</span>
+                      <span className="mt-1 block text-xs uppercase tracking-[0.12em] text-[var(--theme-text-muted)]">{template.category}</span>
+                      <span className="mt-1 block text-xs text-[var(--theme-text-muted)]">{template.description}</span>
+                    </button>
+                  ))}
+                  {selectedHiddenTemplate && (
+                    <Button className="mt-3 w-full" onClick={() => void restoreHiddenTemplate(selectedHiddenTemplate)}>
+                      Restore Template
+                    </Button>
+                  )}
+                </div>
+                <TemplatePdfPreview
+                  dirty={templatePreviewDirty}
+                  error={templatePreviewError}
+                  loading={templatePreviewLoading}
+                  onUpdate={() => selectedHiddenTemplate && void updateTemplatePreview(templateDraftFromItem(selectedHiddenTemplate))}
+                  previewUrl={templatePreviewUrl}
+                  title={selectedHiddenTemplate?.name ?? "Hidden Template"}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {settingsModal && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-6">
-          <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-6 shadow-2xl">
+          <div className={`max-h-[90vh] w-full overflow-auto rounded-2xl bg-white p-6 shadow-2xl ${settingsModal === "data_sheet_templates" ? "max-w-5xl" : "max-w-3xl"}`}>
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-semibold text-[var(--theme-primary)]">
@@ -1198,7 +1598,7 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                     export: "Export Defaults",
                     packet_pages: "Default Packet Pages",
                     observation_checklist: "Default Observation Checklist",
-                    data_columns: "Default Data Table Columns",
+                    data_sheet_templates: "Data Sheet Templates",
                     service_presets: "Service Area Presets",
                     case_manager: "Case Manager Profile",
                   }[settingsModal]}
@@ -1354,62 +1754,235 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                 </div>
               )}
 
-              {settingsModal === "data_columns" && (
-                <div className="space-y-2">
-                  {appSettings.default_data_sheet_columns.map((column, index) => (
-                    <div key={column.id} className="grid gap-2 rounded-xl border border-[var(--theme-border)] bg-white p-3 md:grid-cols-[1fr_10rem_auto]">
-                      <TextInput
-                        aria-label="Column title"
-                        value={column.title}
-                        onChange={(event) => {
-                          const columns = [...appSettings.default_data_sheet_columns];
-                          columns[index] = { ...column, title: event.target.value };
-                          setAppSettings({ ...appSettings, default_data_sheet_columns: columns });
-                        }}
-                      />
-                      <select
-                        className="rounded-xl border border-[var(--theme-border)] bg-white px-3.5 py-2.5 text-sm"
-                        value={column.column_type}
-                        onChange={(event) => {
-                          const columns = [...appSettings.default_data_sheet_columns];
-                          columns[index] = { ...column, column_type: event.target.value as typeof column.column_type };
-                          setAppSettings({ ...appSettings, default_data_sheet_columns: columns });
-                        }}
-                      >
-                        <option value="text">Text</option>
-                        <option value="number">Number</option>
-                        <option value="date">Date</option>
-                        <option value="checkbox">Checkbox</option>
-                        <option value="notes">Notes</option>
-                      </select>
+              {settingsModal === "data_sheet_templates" && (() => {
+                const templates = appSettings.data_sheet_templates;
+                const selectedIndex = Math.min(selectedDataSheetTemplateIndex, Math.max(templates.length - 1, 0));
+                const selected = templates[selectedIndex];
+                const updateTemplate = (patch: Partial<DataSheetDraft>) => {
+                  setAppSettings({
+                    ...appSettings,
+                    data_sheet_templates: templates.map((template, index) =>
+                      index === selectedIndex ? { ...template, ...patch } : template,
+                    ),
+                  });
+                };
+                const updateColumn = (columnIndex: number, patch: Partial<DataSheetDraft["columns"][number]>) => {
+                  if (!selected) return;
+                  updateTemplate({
+                    columns: selected.columns.map((column, index) =>
+                      index === columnIndex ? { ...column, ...patch } : column,
+                    ),
+                  });
+                };
+                const moveColumn = (columnIndex: number, direction: -1 | 1) => {
+                  if (!selected) return;
+                  const targetIndex = columnIndex + direction;
+                  if (targetIndex < 0 || targetIndex >= selected.columns.length) return;
+                  const columns = [...selected.columns];
+                  [columns[columnIndex], columns[targetIndex]] = [columns[targetIndex], columns[columnIndex]];
+                  updateTemplate({
+                    columns: columns.map((column, position) => ({ ...column, position })),
+                  });
+                };
+                return (
+                  <div className="grid gap-5 lg:grid-cols-[18rem_1fr]">
+                    <div className="space-y-2">
                       <Button
-                        variant="text"
-                        onClick={() => setAppSettings({
-                          ...appSettings,
-                          default_data_sheet_columns: appSettings.default_data_sheet_columns.filter((_, columnIndex) => columnIndex !== index).map((item, position) => ({ ...item, position })),
-                        })}
+                        className="mb-2 w-full justify-center"
+                        variant="outline"
+                        onClick={() => {
+                          const next = blankDataSheetTemplate(templates.length);
+                          setAppSettings({
+                            ...appSettings,
+                            data_sheet_templates: [...templates, next],
+                          });
+                          setSelectedDataSheetTemplateIndex(templates.length);
+                        }}
                       >
-                        Delete
+                        Add Template
                       </Button>
+                      {templates.map((template, index) => (
+                        <button
+                          key={template.id ?? `template-${index}`}
+                          className={`w-full rounded-xl border px-3 py-3 text-left transition ${
+                            index === selectedIndex
+                              ? "border-[var(--theme-primary)] bg-[var(--theme-primary-soft)]"
+                              : "border-[var(--theme-border)] bg-white hover:bg-[var(--theme-surface-muted)]"
+                          }`}
+                          type="button"
+                          onClick={() => setSelectedDataSheetTemplateIndex(index)}
+                        >
+                          <span className="block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--theme-accent)]">
+                            Template {index + 1}
+                          </span>
+                          <span className="mt-1 block text-sm font-semibold text-[var(--theme-text)]">
+                            {template.template_name || template.title || "Untitled Template"}
+                          </span>
+                          <span className="mt-1 block text-xs text-[var(--theme-text-muted)]">
+                            {template.columns.length} column{template.columns.length === 1 ? "" : "s"}
+                          </span>
+                        </button>
+                      ))}
                     </div>
-                  ))}
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      const position = appSettings.default_data_sheet_columns.length;
-                      setAppSettings({
-                        ...appSettings,
-                        default_data_sheet_columns: [
-                          ...appSettings.default_data_sheet_columns,
-                          { id: `column_${Date.now()}`, title: "New Column", column_type: "text", position },
-                        ],
-                      });
-                    }}
-                  >
-                    Add Column
-                  </Button>
-                </div>
-              )}
+
+                    {selected ? (
+                      <div className="space-y-4">
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <label className="text-sm font-semibold text-[var(--theme-text)]">
+                            Template Name
+                            <TextInput
+                              className="mt-2"
+                              value={selected.template_name || selected.title}
+                              onChange={(event) => updateTemplate({ template_name: event.target.value, title: event.target.value })}
+                            />
+                          </label>
+                          <label className="text-sm font-semibold text-[var(--theme-text)]">
+                            Collection Type
+                            <select
+                              className="mt-2 w-full rounded-xl border border-[var(--theme-border)] bg-white px-3.5 py-2.5 text-sm"
+                              value={selected.sheet_type ?? "trial_count"}
+                              onChange={(event) => updateTemplate({ sheet_type: event.target.value as DataSheetDraft["sheet_type"] })}
+                            >
+                              {dataSheetTypes.map((type) => (
+                                <option key={type.value} value={type.value}>{type.label}</option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+
+                        <div className="rounded-xl border border-[var(--theme-border)] bg-[var(--theme-surface-muted)] p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-[var(--theme-text)]">Template Columns</p>
+                              <p className="mt-1 text-xs text-[var(--theme-text-muted)]">These columns copy into new data sheets that use this template.</p>
+                            </div>
+                            <Button
+                              variant="outline"
+                              onClick={() => updateTemplate({
+                                columns: [
+                                  ...selected.columns,
+                                  { id: `column_${Date.now()}`, title: "New Column", column_type: "text", position: selected.columns.length },
+                                ],
+                              })}
+                            >
+                              Add Column
+                            </Button>
+                          </div>
+                          <div className="mt-4 space-y-3">
+                            {selected.columns.map((column, columnIndex) => (
+                              <div key={column.id} className="grid gap-2 rounded-xl border border-[var(--theme-border)] bg-white p-3 md:grid-cols-[1fr_10rem_auto]">
+                                <TextInput
+                                  aria-label="Column title"
+                                  value={column.title}
+                                  onChange={(event) => updateColumn(columnIndex, { title: event.target.value })}
+                                />
+                                <select
+                                  className="rounded-xl border border-[var(--theme-border)] bg-white px-3.5 py-2.5 text-sm"
+                                  value={column.column_type}
+                                  onChange={(event) => updateColumn(columnIndex, { column_type: event.target.value as DataSheetColumnType })}
+                                >
+                                  {dataSheetColumnTypes.map((type) => (
+                                    <option key={type.value} value={type.value}>{type.label}</option>
+                                  ))}
+                                </select>
+                                <Button
+                                  variant="text"
+                                  onClick={() => updateTemplate({
+                                    columns: selected.columns
+                                      .filter((_, index) => index !== columnIndex)
+                                      .map((item, position) => ({ ...item, position })),
+                                  })}
+                                >
+                                  Delete
+                                </Button>
+                                <div className="flex flex-wrap gap-2 md:col-span-3">
+                                  <Button
+                                    variant="text"
+                                    disabled={columnIndex === 0}
+                                    onClick={() => moveColumn(columnIndex, -1)}
+                                  >
+                                    Move left
+                                  </Button>
+                                  <Button
+                                    variant="text"
+                                    disabled={columnIndex === selected.columns.length - 1}
+                                    onClick={() => moveColumn(columnIndex, 1)}
+                                  >
+                                    Move right
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <label className="block text-sm font-semibold text-[var(--theme-text)]">
+                          Notes For Staff
+                          <TextArea
+                            className="mt-2"
+                            value={selected.notes}
+                            onChange={(event) => updateTemplate({ notes: event.target.value })}
+                          />
+                        </label>
+
+                        <div className="overflow-hidden rounded-xl border border-[var(--theme-border)] bg-white">
+                          <div className="border-b border-[var(--theme-border)] bg-[var(--theme-surface-muted)] px-4 py-3 text-sm font-semibold text-[var(--theme-text)]">
+                            Template Preview
+                          </div>
+                          <div className="overflow-x-auto p-4">
+                            <table className="w-full border-collapse text-xs">
+                              <thead>
+                                <tr>
+                                  {selected.columns.map((column) => (
+                                    <th key={column.id} className="border border-[var(--theme-border)] bg-[var(--theme-surface-muted)] px-2 py-2 text-left">
+                                      {column.title || "Untitled"}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {Array.from({ length: 4 }).map((_, rowIndex) => (
+                                  <tr key={rowIndex}>
+                                    {selected.columns.map((column) => (
+                                      <td key={column.id} className="h-9 border border-[var(--theme-border)] px-2 py-2">
+                                        {column.column_type === "checkbox" ? <input type="checkbox" disabled aria-label="Preview checkbox" /> : ""}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        <Button
+                          variant="danger"
+                          onClick={() => {
+                            const nextTemplates = templates
+                              .filter((_, index) => index !== selectedIndex)
+                              .map((template, position) => ({ ...template, position }));
+                            setAppSettings({ ...appSettings, data_sheet_templates: nextTemplates });
+                            setSelectedDataSheetTemplateIndex(Math.max(0, selectedIndex - 1));
+                          }}
+                        >
+                          Delete Template
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="grid min-h-80 place-items-center rounded-xl border border-dashed border-[var(--theme-border)]">
+                        <Button
+                          onClick={() => {
+                            setAppSettings({ ...appSettings, data_sheet_templates: [blankDataSheetTemplate(0)] });
+                            setSelectedDataSheetTemplateIndex(0);
+                          }}
+                        >
+                          Add First Template
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {settingsModal === "service_presets" && (
                 <div className="space-y-3">
@@ -1536,18 +2109,27 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="text-sm font-semibold text-[var(--theme-text)]">Brand Kit Name<TextInput className="mt-2" value={brandKitDraft.name} onChange={(event) => setBrandKitDraft({ ...brandKitDraft, name: event.target.value })} /></label>
                   <label className="text-sm font-semibold text-[var(--theme-text)]">
-                    Font
+                    Heading Font
                     <select
                       className="mt-2 w-full rounded-xl border border-[var(--theme-border)] bg-white px-3.5 py-2.5 text-sm"
-                      value={brandKitDraft.default_fonts}
-                      onChange={(event) => setBrandKitDraft({ ...brandKitDraft, default_fonts: event.target.value })}
+                      value={brandKitDraft.heading_font || brandKitDraft.default_fonts || "Poppins"}
+                      onChange={(event) => setBrandKitDraft({ ...brandKitDraft, heading_font: event.target.value })}
                     >
-                      <option value="Open Sans">Open Sans</option>
-                      <option value="Poppins">Poppins</option>
-                      <option value="Segoe UI">Segoe UI</option>
-                      <option value="Arial">Arial</option>
-                      <option value="Georgia">Georgia</option>
-                      <option value="Times New Roman">Times New Roman</option>
+                      {fontOptions.map((font) => (
+                        <option key={font} value={font}>{font}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-sm font-semibold text-[var(--theme-text)]">
+                    Body Font
+                    <select
+                      className="mt-2 w-full rounded-xl border border-[var(--theme-border)] bg-white px-3.5 py-2.5 text-sm"
+                      value={brandKitDraft.body_font || brandKitDraft.default_fonts || "Open Sans"}
+                      onChange={(event) => setBrandKitDraft({ ...brandKitDraft, body_font: event.target.value, default_fonts: event.target.value })}
+                    >
+                      {fontOptions.map((font) => (
+                        <option key={font} value={font}>{font}</option>
+                      ))}
                     </select>
                   </label>
                   <label className="text-sm font-semibold text-[var(--theme-text)]">District<TextInput className="mt-2" value={brandKitDraft.district_name} onChange={(event) => setBrandKitDraft({ ...brandKitDraft, district_name: event.target.value })} /></label>

@@ -9,3 +9,5 @@ data/
 tmp/
 src-tauri/target/
 .VSCodeCounter/
+assets\cove-page-icons.ai
+assets\service-icons.ai

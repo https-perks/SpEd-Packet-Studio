@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { FieldFrame, selectClass, TextArea, TextInput } from "../components/ui/FormField";
@@ -6,22 +6,14 @@ import { ValidationSummary } from "../components/workflow/ValidationSummary";
 import { WorkflowHeader } from "../components/workflow/WorkflowHeader";
 import { useAutosave } from "../hooks/useAutosave";
 import { validateDataSheets } from "../lib/validation";
-import { saveDataSheets } from "../services/api/projects";
+import { getAppSettings, saveDataSheets } from "../services/api/projects";
 import type {
+  AppSettings,
   DataSheetColumnDraft,
   DataSheetColumnType,
   DataSheetDraft,
-  DataSheetType,
   ProjectDetail,
 } from "../types/projects";
-
-const sheetTypes: readonly { value: DataSheetType; label: string }[] = [
-  { value: "trial_count", label: "Trial count" },
-  { value: "frequency", label: "Frequency" },
-  { value: "duration", label: "Duration" },
-  { value: "rubric", label: "Rubric" },
-  { value: "notes", label: "Notes" },
-];
 
 const columnTypes: readonly { value: DataSheetColumnType; label: string }[] = [
   { value: "text", label: "Text" },
@@ -47,17 +39,17 @@ function newColumn(position: number): DataSheetColumnDraft {
   };
 }
 
-function blankDataSheet(project: ProjectDetail, position: number): DataSheetDraft {
-  const firstTemplate = project.data_sheets.find((sheet) => sheet.is_template && !sheet.is_observation_form);
+function blankDataSheet(project: ProjectDetail, position: number, templates: readonly DataSheetDraft[] = []): DataSheetDraft {
+  const firstTemplate = templates[0];
   return {
     title: "",
     sheet_type: firstTemplate?.sheet_type ?? "trial_count",
     goal_ids: project.goals[0]?.id ? [project.goals[0].id] : [],
-    collection_schedule: firstTemplate?.collection_schedule ?? "",
+    collection_schedule: "",
     blank_instance_count: 1,
     columns: firstTemplate?.columns.map((column) => ({ ...column })) ?? defaultColumns.map((column) => ({ ...column })),
     notes: firstTemplate?.notes ?? "",
-    template_name: "",
+    template_name: firstTemplate?.template_name ?? "",
     is_template: false,
     is_observation_form: false,
     position,
@@ -83,7 +75,7 @@ export function DataSheetBuilderPage({
       goal_ids: [...sheet.goal_ids],
       columns: sheet.columns.map((column) => ({ ...column })),
       template_name: sheet.template_name ?? "",
-      is_template: sheet.is_template ?? false,
+      is_template: false,
       is_observation_form: sheet.is_observation_form ?? false,
     })),
   );
@@ -97,9 +89,10 @@ export function DataSheetBuilderPage({
   );
   const [selectedIndex, setSelectedIndex] = useState(project.data_sheets.length ? 0 : -1);
   const [saveError, setSaveError] = useState("");
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const validation = useMemo(() => validateDataSheets(dataSheets), [dataSheets]);
   const selectedSheet = selectedIndex >= 0 ? dataSheets[selectedIndex] : undefined;
-  const templates = project.data_sheets.filter((sheet) => sheet.is_template && !sheet.is_observation_form);
+  const templates = appSettings?.data_sheet_templates ?? [];
   const goalsById = useMemo(
     () => new Map(project.goals.map((goal) => [goal.id, goal])),
     [project.goals],
@@ -107,6 +100,12 @@ export function DataSheetBuilderPage({
   const selectedGoals = selectedSheet
     ? selectedSheet.goal_ids.map((id) => goalsById.get(id)).filter(Boolean)
     : [];
+
+  useEffect(() => {
+    void getAppSettings()
+      .then(setAppSettings)
+      .catch(() => setAppSettings(null));
+  }, []);
 
   const autosave = useAutosave({
     value: dataSheets,
@@ -135,7 +134,7 @@ export function DataSheetBuilderPage({
   });
 
   function addDataSheet() {
-    const next = blankDataSheet(project, dataSheets.length);
+    const next = blankDataSheet(project, dataSheets.length, templates);
     setDataSheets((current) => [...current, next]);
     setSelectedIndex(dataSheets.length);
   }
@@ -154,8 +153,7 @@ export function DataSheetBuilderPage({
     if (!template || !selectedSheet) return;
     updateSelected({
       sheet_type: template.sheet_type,
-      collection_schedule: template.collection_schedule,
-      blank_instance_count: template.blank_instance_count,
+      template_name: template.template_name || template.title,
       columns: template.columns.map((column) => ({ ...column, id: `column-${crypto.randomUUID()}` })),
       notes: template.notes,
     });
@@ -212,7 +210,7 @@ export function DataSheetBuilderPage({
       goal_ids: [...selectedSheet.goal_ids],
       columns: selectedSheet.columns.map((column) => ({ ...column })),
       template_name: selectedSheet.template_name,
-      is_template: selectedSheet.is_template,
+      is_template: false,
       is_observation_form: selectedSheet.is_observation_form,
       position: dataSheets.length,
     };
@@ -329,61 +327,39 @@ export function DataSheetBuilderPage({
                     placeholder="Reading fluency weekly probe"
                   />
                 </FieldFrame>
-                <FieldFrame label="Collection type" htmlFor="sheet-type" required>
+                <FieldFrame label="Choose Template" htmlFor="apply-template" hint="Copies reusable table settings into this sheet.">
                   <select
-                    id="sheet-type"
+                    id="apply-template"
                     className={selectClass}
-                    value={selectedSheet.sheet_type ?? ""}
-                    onChange={(event) =>
-                      updateSelected({ sheet_type: event.target.value as DataSheetType })
-                    }
+                    value={templates.find((template) => (template.template_name || template.title) === selectedSheet.template_name)?.id ?? ""}
+                    onChange={(event) => {
+                      if (event.target.value) applyTemplate(event.target.value);
+                    }}
                   >
-                    {sheetTypes.map((type) => (
-                      <option key={type.value} value={type.value}>{type.label}</option>
-                    ))}
-                  </select>
-                </FieldFrame>
-                <FieldFrame label="Reusable template name" htmlFor="template-name" hint="Optional label for reusing this table structure later.">
-                  <TextInput
-                    id="template-name"
-                    value={selectedSheet.template_name}
-                    onChange={(event) =>
-                      updateSelected({
-                        template_name: event.target.value,
-                        is_template: Boolean(event.target.value.trim()),
-                      })
-                    }
-                    placeholder="Weekly fluency table"
-                  />
-                </FieldFrame>
-                <FieldFrame label="Apply template" htmlFor="apply-template" hint="Copies reusable table settings into this sheet.">
-                  <select id="apply-template" className={selectClass} defaultValue="" onChange={(event) => applyTemplate(event.target.value)}>
                     <option value="">Choose template</option>
-                    {templates.map((template) => (
-                      <option key={template.id} value={template.id}>
+                    {templates.map((template, index) => (
+                      <option key={template.id ?? `template-${index}`} value={template.id ?? ""}>
                         {template.template_name || template.title}
                       </option>
                     ))}
                   </select>
                 </FieldFrame>
-                <div className="md:col-span-2">
-                  <FieldFrame
-                    label="Collection schedule"
-                    htmlFor="collection-schedule"
-                    required
-                    hint="Examples: weekly, every other Friday, 3 trials per session."
-                  >
-                    <TextInput
-                      id="collection-schedule"
-                      value={selectedSheet.collection_schedule}
-                      onChange={(event) =>
-                        updateSelected({ collection_schedule: event.target.value })
-                      }
-                    />
-                  </FieldFrame>
-                </div>
                 <FieldFrame
-                  label="Blank table instances in packet"
+                  label="Collection schedule"
+                  htmlFor="collection-schedule"
+                  required
+                  hint="Examples: weekly, every other Friday, 3 trials per session."
+                >
+                  <TextInput
+                    id="collection-schedule"
+                    value={selectedSheet.collection_schedule}
+                    onChange={(event) =>
+                      updateSelected({ collection_schedule: event.target.value })
+                    }
+                  />
+                </FieldFrame>
+                <FieldFrame
+                  label="# of Tables in Packet"
                   htmlFor="blank-instance-count"
                   required
                   hint="This repeats the blank table in the final packet without duplicating the data sheet object."

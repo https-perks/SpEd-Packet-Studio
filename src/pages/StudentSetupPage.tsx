@@ -8,10 +8,13 @@ import { useAutosave } from "../hooks/useAutosave";
 import { validateStudentSetup } from "../lib/validation";
 import { getAppSettings, saveAppSettings, saveStudentSetup } from "../services/api/projects";
 import type {
+  AccommodationDraft,
   AppSettings,
   Audience,
+  BehaviorPlanSectionDraft,
   DeliveryModel,
   ProjectDetail,
+  RelatedServiceProviderDraft,
   ServiceAreaDraft,
   StudentSetupDraft,
 } from "../types/projects";
@@ -26,6 +29,18 @@ const audienceOptions: readonly { value: Audience; label: string }[] = [
 
 const settingOptions = ["Regular Education", "Special Education"] as const;
 const customSettingValue = "__custom_setting__";
+type StudentSetupModal = "accommodations" | "behavior_plan" | "related_services" | null;
+const accommodationAreaOptions = ["Instructional", "Classroom Assessment", "Personnel", "Parent", "Other"] as const;
+const relatedServiceProviderOptions = ["Speech/Language Pathologist", "Occupational Therapist", "Physical Therapist"] as const;
+const defaultBehaviorPlanSections = [
+  "Defined Problem Behavior",
+  "Context and Function (FBA Results)",
+  "Prevention Strategies",
+  "Replacement Behaviors",
+  "Response Strategies",
+  "Safety Net/Crisis Plan",
+  "Monitoring and Adjustment",
+] as const;
 
 const fallbackServiceAreaPresets = [
   "Reading",
@@ -58,6 +73,43 @@ function blankServiceArea(position: number): ServiceAreaDraft {
     minutes_per_week: null,
     delivery_model: null,
     notes: "",
+    position,
+  };
+}
+
+function blankAccommodation(position: number): AccommodationDraft {
+  return {
+    id: null,
+    content_area: "Instructional",
+    custom_content_area: "",
+    text: "",
+    position,
+  };
+}
+
+function accommodationLabel(item: AccommodationDraft) {
+  if (item.content_area === "Other") return item.custom_content_area.trim() || "Other";
+  return item.content_area || "Instructional";
+}
+
+function blankBehaviorPlanSection(position: number, existingSections: readonly BehaviorPlanSectionDraft[] = []): BehaviorPlanSectionDraft {
+  const usedTitles = new Set(existingSections.map((section) => section.title.trim()).filter(Boolean));
+  const nextTitle = defaultBehaviorPlanSections.find((title) => !usedTitles.has(title)) ?? "New Behavior Plan Section";
+  return {
+    id: null,
+    title: nextTitle,
+    text: "",
+    position,
+  };
+}
+
+function blankRelatedServiceProvider(position: number): RelatedServiceProviderDraft {
+  return {
+    id: null,
+    name: "",
+    email: "",
+    phone: "",
+    service_area: "Speech/Language Pathologist",
     position,
   };
 }
@@ -108,6 +160,10 @@ function initialDraft(project: ProjectDetail): StudentSetupDraft {
     student,
     service_areas: project.service_areas.map((area) => ({ ...area })),
     audiences: [...project.audiences],
+    accommodations: (project.accommodations ?? []).map((item) => ({ ...item })),
+    behavior_plan: project.behavior_plan ?? "",
+    behavior_plan_sections: (project.behavior_plan_sections ?? []).map((item) => ({ ...item })),
+    related_service_providers: (project.related_service_providers ?? []).map((item) => ({ ...item })),
   };
 }
 
@@ -130,6 +186,7 @@ export function StudentSetupPage({
   const [openServiceAreaMenu, setOpenServiceAreaMenu] = useState<number | null>(null);
   const [addingServiceAreaForIndex, setAddingServiceAreaForIndex] = useState<number | null>(null);
   const [newServiceAreaName, setNewServiceAreaName] = useState("");
+  const [contentModal, setContentModal] = useState<StudentSetupModal>(null);
   const [customSettingRows, setCustomSettingRows] = useState<ReadonlySet<string>>(
     () =>
       new Set(
@@ -369,6 +426,11 @@ export function StudentSetupPage({
         <Card
           title="Case manager"
           description="This contact information appears in the Team Contacts box on the Service Information page."
+          actions={(
+            <Button variant="outline" onClick={() => setContentModal("related_services")}>
+              Related Services
+            </Button>
+          )}
         >
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
             <FieldFrame label="First name" htmlFor="case-manager-first">
@@ -410,6 +472,48 @@ export function StudentSetupPage({
                   placeholder="Preferred contact times, role notes, or internal reminders"
                 />
               </FieldFrame>
+            </div>
+          </div>
+          <div className="mt-5 rounded-xl border border-[var(--theme-border)] bg-white p-4">
+            <p className="text-sm font-semibold text-[var(--theme-text)]">Related service providers</p>
+            <p className="mt-2 text-sm leading-6 text-[var(--theme-text-muted)]">
+              {draft.related_service_providers.filter((provider) => provider.name.trim()).length
+                ? `${draft.related_service_providers.filter((provider) => provider.name.trim()).length} provider(s) entered.`
+                : "No related service providers entered yet."}
+            </p>
+          </div>
+        </Card>
+
+        <Card
+          title="Packet support pages"
+          description="Add staff-facing accommodations and behavior support content for the packet."
+          actions={(
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => setContentModal("accommodations")}>
+                Add Accommodations
+              </Button>
+              <Button variant="outline" onClick={() => setContentModal("behavior_plan")}>
+                Add Behavior Plan
+              </Button>
+            </div>
+          )}
+        >
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="rounded-xl border border-[var(--theme-border)] bg-white p-4">
+              <p className="text-sm font-semibold text-[var(--theme-text)]">Accommodations/Modifications</p>
+              <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-[var(--theme-text-muted)]">
+                {draft.accommodations.filter((item) => item.text.trim()).length
+                  ? `${draft.accommodations.filter((item) => item.text.trim()).length} content area(s) entered.`
+                  : "No accommodations entered yet."}
+              </p>
+            </div>
+            <div className="rounded-xl border border-[var(--theme-border)] bg-white p-4">
+              <p className="text-sm font-semibold text-[var(--theme-text)]">Behavior Plan</p>
+              <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-[var(--theme-text-muted)]">
+                {draft.behavior_plan_sections.filter((item) => item.text.trim()).length
+                  ? `${draft.behavior_plan_sections.filter((item) => item.text.trim()).length} section(s) entered.`
+                  : draft.behavior_plan.trim() || "No behavior plan entered yet."}
+              </p>
             </div>
           </div>
         </Card>
@@ -615,6 +719,341 @@ export function StudentSetupPage({
               </Button>
               <Button disabled={!newServiceAreaName.trim()} onClick={() => void saveNewServiceAreaPreset()}>
                 Add Service Area
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+      {contentModal && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-6">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-2xl border border-[var(--theme-border)] bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--theme-accent)]">
+                  Student Setup
+                </p>
+                <h2 className="mt-2 text-2xl font-semibold text-[var(--theme-primary)]">
+                  {contentModal === "accommodations"
+                    ? "Accommodations/Modifications"
+                    : contentModal === "behavior_plan"
+                      ? "Behavior Plan"
+                      : "Related Service Providers"}
+                </h2>
+                <p className="mt-1 text-sm text-[var(--theme-text-muted)]">
+                  This content appears on its matching packet page.
+                </p>
+              </div>
+              <Button variant="text" onClick={() => setContentModal(null)}>
+                Close
+              </Button>
+            </div>
+
+            {contentModal === "accommodations" ? (
+              <div className="mt-5 space-y-4">
+                <Button
+                  variant="outline"
+                  onClick={() => setDraft((current) => ({
+                    ...current,
+                    accommodations: [
+                      ...current.accommodations,
+                      blankAccommodation(current.accommodations.length),
+                    ],
+                  }))}
+                >
+                  Add New
+                </Button>
+
+                {draft.accommodations.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-[var(--theme-border)] p-6 text-center text-sm text-[var(--theme-text-muted)]">
+                    No accommodation content areas yet.
+                  </div>
+                ) : (
+                  draft.accommodations.map((item, index) => (
+                    <div key={item.id ?? `accommodation-${index}`} className="rounded-xl border border-[var(--theme-border)] bg-[var(--theme-surface-muted)]/45 p-4">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold text-[var(--theme-text)]">
+                          {accommodationLabel(item)}
+                        </p>
+                        <Button
+                          variant="text"
+                          onClick={() => setDraft((current) => ({
+                            ...current,
+                            accommodations: current.accommodations
+                              .filter((_, accommodationIndex) => accommodationIndex !== index)
+                              .map((value, position) => ({ ...value, position })),
+                          }))}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <FieldFrame label="Content Area" htmlFor={`accommodation-${index}-area`}>
+                          <select
+                            className={selectClass}
+                            id={`accommodation-${index}-area`}
+                            value={item.content_area}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              setDraft((current) => ({
+                                ...current,
+                                accommodations: current.accommodations.map((currentItem, accommodationIndex) =>
+                                  accommodationIndex === index
+                                    ? {
+                                      ...currentItem,
+                                      content_area: value,
+                                      custom_content_area: value === "Other" ? currentItem.custom_content_area : "",
+                                    }
+                                    : currentItem,
+                                ),
+                              }));
+                            }}
+                          >
+                            {accommodationAreaOptions.map((option) => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                          </select>
+                        </FieldFrame>
+                        {item.content_area === "Other" && (
+                          <FieldFrame label="Custom Content Area" htmlFor={`accommodation-${index}-custom-area`}>
+                            <TextInput
+                              id={`accommodation-${index}-custom-area`}
+                              value={item.custom_content_area}
+                              onChange={(event) => setDraft((current) => ({
+                                ...current,
+                                accommodations: current.accommodations.map((currentItem, accommodationIndex) =>
+                                  accommodationIndex === index
+                                    ? { ...currentItem, custom_content_area: event.target.value }
+                                    : currentItem,
+                                ),
+                              }))}
+                              placeholder="Example: Transportation"
+                            />
+                          </FieldFrame>
+                        )}
+                        <div className="md:col-span-2">
+                          <FieldFrame label="Accommodations" htmlFor={`accommodation-${index}-text`}>
+                            <TextArea
+                              id={`accommodation-${index}-text`}
+                              value={item.text}
+                              onChange={(event) => setDraft((current) => ({
+                                ...current,
+                                accommodations: current.accommodations.map((currentItem, accommodationIndex) =>
+                                  accommodationIndex === index
+                                    ? { ...currentItem, text: event.target.value, position: index }
+                                    : currentItem,
+                                ),
+                              }))}
+                              placeholder="Enter accommodations for this content area..."
+                            />
+                          </FieldFrame>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : contentModal === "behavior_plan" ? (
+              <div className="mt-5 space-y-4">
+                <Button
+                  variant="outline"
+                  onClick={() => setDraft((current) => ({
+                    ...current,
+                    behavior_plan_sections: [
+                      ...current.behavior_plan_sections,
+                      blankBehaviorPlanSection(
+                        current.behavior_plan_sections.length,
+                        current.behavior_plan_sections,
+                      ),
+                    ],
+                  }))}
+                >
+                  Add New
+                </Button>
+
+                {draft.behavior_plan_sections.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-[var(--theme-border)] p-6 text-center text-sm text-[var(--theme-text-muted)]">
+                    No behavior plan sections yet.
+                  </div>
+                ) : (
+                  draft.behavior_plan_sections.map((item, index) => (
+                    <div key={item.id ?? `behavior-section-${index}`} className="rounded-xl border border-[var(--theme-border)] bg-[var(--theme-surface-muted)]/45 p-4">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold text-[var(--theme-text)]">
+                          {item.title.trim() || `Behavior plan section ${index + 1}`}
+                        </p>
+                        <Button
+                          variant="text"
+                          onClick={() => setDraft((current) => ({
+                            ...current,
+                            behavior_plan_sections: current.behavior_plan_sections
+                              .filter((_, sectionIndex) => sectionIndex !== index)
+                              .map((value, position) => ({ ...value, position })),
+                          }))}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                      <div className="grid gap-4">
+                        <FieldFrame label="Section Name" htmlFor={`behavior-${index}-title`}>
+                          <TextInput
+                            id={`behavior-${index}-title`}
+                            list={`behavior-${index}-title-options`}
+                            value={item.title}
+                            onChange={(event) => setDraft((current) => ({
+                              ...current,
+                              behavior_plan_sections: current.behavior_plan_sections.map((currentItem, sectionIndex) =>
+                                sectionIndex === index
+                                  ? { ...currentItem, title: event.target.value, position: index }
+                                  : currentItem,
+                              ),
+                            }))}
+                            placeholder="Example: Prevention Strategies"
+                          />
+                          <datalist id={`behavior-${index}-title-options`}>
+                            {defaultBehaviorPlanSections.map((sectionTitle) => (
+                              <option key={sectionTitle} value={sectionTitle} />
+                            ))}
+                          </datalist>
+                        </FieldFrame>
+                        <FieldFrame label="Behavior Plan Content" htmlFor={`behavior-${index}-text`}>
+                          <TextArea
+                            id={`behavior-${index}-text`}
+                            className="min-h-40"
+                            value={item.text}
+                            onChange={(event) => setDraft((current) => ({
+                              ...current,
+                              behavior_plan_sections: current.behavior_plan_sections.map((currentItem, sectionIndex) =>
+                                sectionIndex === index
+                                  ? { ...currentItem, text: event.target.value, position: index }
+                                  : currentItem,
+                              ),
+                            }))}
+                            placeholder="Enter details for this behavior plan section..."
+                          />
+                        </FieldFrame>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : (
+              <div className="mt-5 space-y-4">
+                <Button
+                  variant="outline"
+                  onClick={() => setDraft((current) => ({
+                    ...current,
+                    related_service_providers: [
+                      ...current.related_service_providers,
+                      blankRelatedServiceProvider(current.related_service_providers.length),
+                    ],
+                  }))}
+                >
+                  Add Provider
+                </Button>
+
+                {draft.related_service_providers.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-[var(--theme-border)] p-6 text-center text-sm text-[var(--theme-text-muted)]">
+                    No related service providers yet.
+                  </div>
+                ) : (
+                  draft.related_service_providers.map((provider, index) => (
+                    <div key={provider.id ?? `related-provider-${index}`} className="rounded-xl border border-[var(--theme-border)] bg-[var(--theme-surface-muted)]/45 p-4">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold text-[var(--theme-text)]">
+                          {provider.name.trim() || `Provider ${index + 1}`}
+                        </p>
+                        <Button
+                          variant="text"
+                          onClick={() => setDraft((current) => ({
+                            ...current,
+                            related_service_providers: current.related_service_providers
+                              .filter((_, providerIndex) => providerIndex !== index)
+                              .map((value, position) => ({ ...value, position })),
+                          }))}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <FieldFrame label="Provider Name" htmlFor={`related-provider-${index}-name`}>
+                          <TextInput
+                            id={`related-provider-${index}-name`}
+                            value={provider.name}
+                            onChange={(event) => setDraft((current) => ({
+                              ...current,
+                              related_service_providers: current.related_service_providers.map((currentProvider, providerIndex) =>
+                                providerIndex === index
+                                  ? { ...currentProvider, name: event.target.value, position: index }
+                                  : currentProvider,
+                              ),
+                            }))}
+                            placeholder="First and last name"
+                          />
+                        </FieldFrame>
+                        <FieldFrame label="Service Area" htmlFor={`related-provider-${index}-service`}>
+                          <select
+                            className={selectClass}
+                            id={`related-provider-${index}-service`}
+                            value={provider.service_area}
+                            onChange={(event) => setDraft((current) => ({
+                              ...current,
+                              related_service_providers: current.related_service_providers.map((currentProvider, providerIndex) =>
+                                providerIndex === index
+                                  ? { ...currentProvider, service_area: event.target.value, position: index }
+                                  : currentProvider,
+                              ),
+                            }))}
+                          >
+                            {relatedServiceProviderOptions.map((option) => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                          </select>
+                        </FieldFrame>
+                        <FieldFrame label="Email" htmlFor={`related-provider-${index}-email`}>
+                          <TextInput
+                            id={`related-provider-${index}-email`}
+                            type="email"
+                            value={provider.email}
+                            onChange={(event) => setDraft((current) => ({
+                              ...current,
+                              related_service_providers: current.related_service_providers.map((currentProvider, providerIndex) =>
+                                providerIndex === index
+                                  ? { ...currentProvider, email: event.target.value, position: index }
+                                  : currentProvider,
+                              ),
+                            }))}
+                            placeholder="provider@example.org"
+                          />
+                        </FieldFrame>
+                        <FieldFrame label="Phone Number" htmlFor={`related-provider-${index}-phone`}>
+                          <TextInput
+                            id={`related-provider-${index}-phone`}
+                            type="tel"
+                            value={provider.phone}
+                            onChange={(event) => setDraft((current) => ({
+                              ...current,
+                              related_service_providers: current.related_service_providers.map((currentProvider, providerIndex) =>
+                                providerIndex === index
+                                  ? { ...currentProvider, phone: event.target.value, position: index }
+                                  : currentProvider,
+                              ),
+                            }))}
+                            placeholder="(555) 010-1234"
+                          />
+                        </FieldFrame>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            <div className="mt-6 flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setContentModal(null)}>
+                Done
+              </Button>
+              <Button onClick={() => void autosave.saveImmediately().then(() => setContentModal(null))}>
+                Save & Close
               </Button>
             </div>
           </div>

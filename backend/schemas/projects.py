@@ -16,6 +16,16 @@ Audience = Literal[
 ]
 DeliveryModel = Literal["push_in", "pull_out", "combined", "other"]
 
+DEFAULT_SERVICE_AREA_COLORS = {
+    "Math": "#22C55E",
+    "Reading": "#2563EB",
+    "Written Expression": "#8B5CF6",
+    "S/E/B": "#F59E0B",
+    "SH/I": "#E11D48",
+    "Communication": "#06B6D4",
+    "Speech/Language": "#6366F1",
+}
+
 
 class ValidationIssue(ApiSchema):
     field: str
@@ -110,12 +120,55 @@ class ServiceAreaDraft(ApiSchema):
         return None if value == "" else value
 
 
+class AccommodationDraft(ApiSchema):
+    id: str | None = None
+    content_area: str = Field(default="Instructional", max_length=120)
+    custom_content_area: str = Field(default="", max_length=160)
+    text: str = Field(default="", max_length=5000)
+    position: int = Field(default=0, ge=0)
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def normalize_blank_id(cls, value: object) -> object:
+        return None if value == "" else value
+
+
+class BehaviorPlanSectionDraft(ApiSchema):
+    id: str | None = None
+    title: str = Field(default="", max_length=180)
+    text: str = Field(default="", max_length=5000)
+    position: int = Field(default=0, ge=0)
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def normalize_blank_id(cls, value: object) -> object:
+        return None if value == "" else value
+
+
+class RelatedServiceProviderDraft(ApiSchema):
+    id: str | None = None
+    name: str = Field(default="", max_length=200)
+    email: str = Field(default="", max_length=200)
+    phone: str = Field(default="", max_length=80)
+    service_area: str = Field(default="Speech/Language Pathologist", max_length=200)
+    position: int = Field(default=0, ge=0)
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def normalize_blank_id(cls, value: object) -> object:
+        return None if value == "" else value
+
+
 class StudentSetupDraft(ApiSchema):
     project_name: str = Field(default="", max_length=200)
     school_year: str = Field(default="", max_length=20)
     student: StudentDraft = Field(default_factory=StudentDraft)
     service_areas: list[ServiceAreaDraft] = Field(default_factory=list)
     audiences: list[Audience] = Field(default_factory=list)
+    accommodations: list[AccommodationDraft] = Field(default_factory=list)
+    behavior_plan: str = Field(default="", max_length=10000)
+    behavior_plan_sections: list[BehaviorPlanSectionDraft] = Field(default_factory=list)
+    related_service_providers: list[RelatedServiceProviderDraft] = Field(default_factory=list)
 
 
 class GoalDraft(ApiSchema):
@@ -278,7 +331,7 @@ class ThemeCustomization(ApiSchema):
     background_color: str = Field(default="#f3f7fc", max_length=24)
     card_color: str = Field(default="#ffffff", max_length=24)
     text_color: str = Field(default="#12213a", max_length=24)
-    service_area_colors: dict[str, str] = Field(default_factory=dict)
+    service_area_colors: dict[str, str] = Field(default_factory=lambda: dict(DEFAULT_SERVICE_AREA_COLORS))
 
 
 class ThemePaletteDraft(ApiSchema):
@@ -301,6 +354,8 @@ class BrandKit(ApiSchema):
     watermark_logo_filename: str = Field(default="", max_length=255)
     watermark_enabled: bool = False
     default_fonts: str = Field(default="", max_length=200)
+    heading_font: str = Field(default="", max_length=200)
+    body_font: str = Field(default="", max_length=200)
     primary_color: str = Field(default="#0f2d55", max_length=24)
     secondary_color: str = Field(default="#27b8b2", max_length=24)
     accent_color: str = Field(default="#ef7900", max_length=24)
@@ -340,6 +395,7 @@ class PacketTemplateLibraryItem(PacketTemplateOption):
     customization: ThemeCustomization = Field(default_factory=ThemeCustomization)
     is_builtin: bool = False
     is_default: bool = False
+    is_hidden: bool = False
 
 
 class PacketTemplateLibraryDraft(ApiSchema):
@@ -349,6 +405,10 @@ class PacketTemplateLibraryDraft(ApiSchema):
     base_template_id: str = Field(default="modern_professional", max_length=80)
     theme_id: str = Field(default="teacher_friendly", max_length=80)
     customization: ThemeCustomization = Field(default_factory=ThemeCustomization)
+
+
+class TemplatePreviewRequest(PacketTemplateLibraryDraft):
+    pass
 
 
 class BrandKitLibraryItem(BrandKit):
@@ -367,6 +427,8 @@ class BrandKitLibraryDraft(ApiSchema):
     watermark_logo_filename: str = Field(default="", max_length=255)
     watermark_enabled: bool = False
     default_fonts: str = Field(default="", max_length=200)
+    heading_font: str = Field(default="", max_length=200)
+    body_font: str = Field(default="", max_length=200)
     primary_color: str = Field(default="#0f2d55", max_length=24)
     secondary_color: str = Field(default="#27b8b2", max_length=24)
     accent_color: str = Field(default="#ef7900", max_length=24)
@@ -405,6 +467,7 @@ class AppSettings(ApiSchema):
     default_packet_pages: list[PacketPageDraft] = Field(default_factory=list)
     default_observation_checklist: list[str] = Field(default_factory=list)
     default_data_sheet_columns: list[DataSheetColumnDraft] = Field(default_factory=list)
+    data_sheet_templates: list[DataSheetDraft] = Field(default_factory=list)
     service_area_presets: list[ServiceAreaDraft] = Field(default_factory=list)
     case_manager_profile: CaseManagerProfile = Field(default_factory=CaseManagerProfile)
 
@@ -447,6 +510,10 @@ class ProjectDetail(ApiSchema):
     student: StudentResponse | None
     service_areas: list[ServiceAreaResponse]
     audiences: list[Audience]
+    accommodations: list[AccommodationDraft] = Field(default_factory=list)
+    behavior_plan: str = ""
+    behavior_plan_sections: list[BehaviorPlanSectionDraft] = Field(default_factory=list)
+    related_service_providers: list[RelatedServiceProviderDraft] = Field(default_factory=list)
     packet_versions: list[PacketVersionResponse]
     packet_builder: list[PacketVersionConfig] = Field(default_factory=list)
     observation_checklist: list[str] = Field(default_factory=list)

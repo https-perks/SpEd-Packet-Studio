@@ -124,6 +124,41 @@ class ProjectWorkflowTests(unittest.TestCase):
                         }
                     ],
                     "audiences": ["case_manager", "general_education"],
+                    "accommodations": [
+                        {
+                            "content_area": "Instructional",
+                            "custom_content_area": "",
+                            "text": "Preferential seating near instruction.\nChunk multi-step assignments.",
+                            "position": 0,
+                        },
+                        {
+                            "content_area": "Other",
+                            "custom_content_area": "Transportation",
+                            "text": "Use a visual cue before bus dismissal.",
+                            "position": 1,
+                        },
+                    ],
+                    "behavior_plan_sections": [
+                        {
+                            "title": "Defined Problem Behavior",
+                            "text": "Task refusal during multi-step independent work.",
+                            "position": 0,
+                        },
+                        {
+                            "title": "Prevention Strategies",
+                            "text": "Use pre-correction before transitions.\nOffer a brief reset break when needed.",
+                            "position": 1,
+                        },
+                    ],
+                    "related_service_providers": [
+                        {
+                            "name": "Sam SLP",
+                            "email": "sam.slp@example.edu",
+                            "phone": "555-0199",
+                            "service_area": "Speech/Language Pathologist",
+                            "position": 0,
+                        }
+                    ],
                 }
             )
             detail = projects.save_student_setup(session, created.id, setup)
@@ -131,6 +166,11 @@ class ProjectWorkflowTests(unittest.TestCase):
             self.assertEqual(detail.student.initials if detail.student else None, "JR")
             self.assertEqual(detail.student.case_manager if detail.student else None, "Alex Teacher")
             self.assertEqual(detail.student.case_manager_email if detail.student else None, "alex.teacher@example.edu")
+            self.assertEqual(len(detail.accommodations), 2)
+            self.assertIn("Preferential seating", detail.accommodations[0].text)
+            self.assertEqual(len(detail.behavior_plan_sections), 2)
+            self.assertEqual(len(detail.related_service_providers), 1)
+            self.assertIn("pre-correction", detail.behavior_plan)
             self.assertEqual(detail.school_year, "2026-2027")
             self.assertEqual(len(detail.audiences), 2)
 
@@ -374,6 +414,15 @@ class ProjectWorkflowTests(unittest.TestCase):
                         background_color="#ffffff",
                         card_color="#ffffff",
                         text_color="#111111",
+                        service_area_colors={
+                            "Reading": "#010203",
+                            "Math": "#22C55E",
+                            "Written Expression": "#8B5CF6",
+                            "S/E/B": "#F59E0B",
+                            "SH/I": "#E11D48",
+                            "Communication": "#06B6D4",
+                            "Speech/Language": "#6366F1",
+                        },
                     ),
                 ),
             )
@@ -442,6 +491,15 @@ class ProjectWorkflowTests(unittest.TestCase):
                         background_color="#ffffff",
                         card_color="#ffffff",
                         text_color="#111111",
+                        service_area_colors={
+                            "Reading": "#010203",
+                            "Math": "#22C55E",
+                            "Written Expression": "#8B5CF6",
+                            "S/E/B": "#F59E0B",
+                            "SH/I": "#E11D48",
+                            "Communication": "#06B6D4",
+                            "Speech/Language": "#6366F1",
+                        },
                     ),
                 ),
             )
@@ -465,6 +523,79 @@ class ProjectWorkflowTests(unittest.TestCase):
                 customization=projects._customization_for_template("district_branding"),  # noqa: SLF001
             )
             self.assertIn("#123456", builtin_template_html)
+            self.assertIn("background-color: #010203;", builtin_template_html)
+            self.assertEqual(
+                projects._service_area_icon_color(  # noqa: SLF001 - custom service area color regression
+                    "Transition",
+                    projects.ThemeCustomization(service_area_colors={"Transition": "#112233"}),
+                ),
+                "#112233",
+            )
+            self.assertEqual(
+                projects._service_area_icon_color(  # noqa: SLF001 - service area alias color regression
+                    "Social/Emotional/Behavioral",
+                    projects.ThemeCustomization(service_area_colors={"S/E/B": "#445566"}),
+                ),
+                "#445566",
+            )
+            self.assertEqual(
+                projects._service_area_icon_color(  # noqa: SLF001 - service area alias color regression
+                    "Speech/Language",
+                    projects.ThemeCustomization(service_area_colors={"Speech-Language": "#778899"}),
+                ),
+                "#778899",
+            )
+            minimal_customization = projects._customization_from_tokens("minimal")  # noqa: SLF001 - minimal palette service color regression
+            self.assertTrue(
+                all(color == "#4B5563" for color in minimal_customization.service_area_colors.values())
+            )
+            self.assertEqual(
+                projects._service_area_icon_color(  # noqa: SLF001 - minimal palette custom service color regression
+                    "Transition",
+                    projects.ThemeCustomization(service_area_colors={"Transition": "#112233"}),
+                    theme_id="minimal",
+                ),
+                "#4B5563",
+            )
+            if renderer_available():
+                preview_pdf = projects.preview_template_library_item(
+                    projects.TemplatePreviewRequest(
+                        name="Unsaved Preview Template",
+                        description="Draft template preview.",
+                        category="Custom",
+                        base_template_id="district_branding",
+                        theme_id=custom_palette.id,
+                        customization=projects.ThemeCustomization(
+                            primary_color="#123456",
+                            secondary_color="#345678",
+                            accent_color="#abcdef",
+                            background_color="#ffffff",
+                            card_color="#ffffff",
+                            text_color="#111111",
+                        ),
+                    )
+                )
+                self.assertGreater(len(preview_pdf), 1000)
+                self.assertEqual(preview_pdf[:4], b"%PDF")
+            projects.delete_template_library_item("district_branding")
+            self.assertNotIn(
+                "district_branding",
+                [template.id for template in projects.list_template_library()],
+            )
+            self.assertIn(
+                "district_branding",
+                [template.id for template in projects.list_hidden_template_library()],
+            )
+            self.assertEqual(
+                projects._template_library_item("district_branding").id,  # noqa: SLF001 - hidden template export regression
+                "district_branding",
+            )
+            projects.restore_template_library_item("district_branding")
+            self.assertIn(
+                "district_branding",
+                [template.id for template in projects.list_template_library()],
+            )
+            self.assertFalse(projects.list_hidden_template_library())
             projects.delete_theme_palette(custom_palette.id)
             self.assertNotIn(custom_palette.id, [theme.id for theme in projects.list_themes()])
             self.assertIn(
@@ -483,6 +614,8 @@ class ProjectWorkflowTests(unittest.TestCase):
                     school_name="Central Middle",
                     watermark_enabled=True,
                     default_fonts="Open Sans",
+                    heading_font="Poppins",
+                    body_font="Open Sans",
                 )
             )
             self.assertTrue(brand_kit.id.startswith("brand_"))
@@ -500,6 +633,52 @@ class ProjectWorkflowTests(unittest.TestCase):
             self.assertTrue(
                 any(kit.is_default for kit in projects.set_default_brand_kit(brand_kit.id))
             )
+            detail = projects.save_project_theme(
+                session,
+                created.id,
+                ThemeSelection.model_validate(
+                    {
+                        "theme_id": detail.theme_id,
+                        "packet_template_id": "modern_professional",
+                        "customization": detail.theme_customization.model_dump(),
+                        "brand_kit": brand_kit.model_dump(exclude={"is_default"}),
+                    }
+                ),
+            )
+            self.assertEqual(detail.brand_kit.heading_font, "Poppins")
+            self.assertEqual(detail.brand_kit.body_font, "Open Sans")
+            brand_kit = projects.update_brand_kit(
+                brand_kit.id,
+                projects.BrandKitLibraryDraft(
+                    name=brand_kit.name,
+                    district_name=brand_kit.district_name,
+                    school_name=brand_kit.school_name,
+                    logo_relative_path=brand_kit.logo_relative_path,
+                    logo_filename=brand_kit.logo_filename,
+                    watermark_logo_relative_path=brand_kit.watermark_logo_relative_path,
+                    watermark_logo_filename=brand_kit.watermark_logo_filename,
+                    watermark_enabled=brand_kit.watermark_enabled,
+                    default_fonts="Arial",
+                    heading_font="Georgia",
+                    body_font="Arial",
+                    preferred_cover_style=brand_kit.preferred_cover_style,
+                    footer_text=brand_kit.footer_text,
+                    default_filename_template=brand_kit.default_filename_template,
+                ),
+            )
+            detail = projects._detail(projects.get_project(session, created.id))  # noqa: SLF001 - brand kit library refresh regression
+            self.assertEqual(detail.brand_kit.heading_font, "Georgia")
+            self.assertEqual(detail.brand_kit.body_font, "Arial")
+            font_html = projects._build_packet_html(  # noqa: SLF001 - brand kit font regression
+                detail,
+                theme_id=detail.theme_id,
+                packet_template_id=detail.packet_template_id,
+                packet_version_name=detail.packet_versions[0].name,
+                packet_config=detail.packet_builder[0],
+                customization=projects._customization_for_template(detail.packet_template_id),  # noqa: SLF001
+            )
+            self.assertIn('font-family: Georgia, "Times New Roman", serif;', font_html)
+            self.assertIn("font-family: Arial, sans-serif;", font_html)
             self.assertIn(
                 created.id,
                 [item.id for item in projects.list_projects(session, service_area="Reading")],
@@ -529,6 +708,10 @@ class ProjectWorkflowTests(unittest.TestCase):
             self.assertIn("brand-logo", html)
             self.assertIn("#24577a", html)
             self.assertIn("alex.teacher@example.edu", html)
+            self.assertIn("Preferential seating", html)
+            self.assertIn("Transportation", html)
+            self.assertIn("Use pre-correction", html)
+            self.assertIn("sam.slp@example.edu", html)
             self.assertNotIn("Follow-up / Action", html)
             self.assertIn("New concerns", html)
             botanical_html = projects._build_packet_html(  # noqa: SLF001 - template rendering regression coverage

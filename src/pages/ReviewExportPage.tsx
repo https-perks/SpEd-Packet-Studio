@@ -39,6 +39,8 @@ const emptyBrandKit: BrandKit = {
   watermark_logo_filename: "",
   watermark_enabled: false,
   default_fonts: "",
+  heading_font: "",
+  body_font: "",
   primary_color: "#0f2d55",
   secondary_color: "#27b8b2",
   accent_color: "#ef7900",
@@ -77,6 +79,8 @@ function projectBrandKit(value: BrandKit | BrandKitLibraryItem): BrandKit {
     watermark_logo_filename: value.watermark_logo_filename,
     watermark_enabled: value.watermark_enabled,
     default_fonts: value.default_fonts,
+    heading_font: value.heading_font || value.default_fonts,
+    body_font: value.body_font || value.default_fonts,
     primary_color: value.primary_color,
     secondary_color: value.secondary_color,
     accent_color: value.accent_color,
@@ -108,6 +112,7 @@ export function ReviewExportPage({
   const [selectedThemeId, setSelectedThemeId] = useState(project.theme_id || "teacher_friendly");
   const [selectedTemplateId, setSelectedTemplateId] = useState(project.packet_template_id || "modern_professional");
   const [exportSettings, setExportSettings] = useState<ExportSettings>(project.export_settings);
+  const [savedExportPath, setSavedExportPath] = useState("");
   const [selectedPacketVersionId, setSelectedPacketVersionId] = useState(
     project.packet_versions[0]?.id ?? "",
   );
@@ -136,14 +141,28 @@ export function ReviewExportPage({
     setExporting(true);
     setError("");
     try {
+      const exportMode = exportSettings.export_mode;
+      const extension = exportMode === "zip_archive" ? "zip" : "pdf";
+      const suggestedName = (project.default_export_filename || `${project.student?.name || "Student"} - Service Packet`)
+        .replace(/\.(pdf|zip)$/i, "");
+      const destinationPath = await invoke<string | null>("select_save_file", {
+        suggestedFilename: `${suggestedName}.${extension}`,
+        extension,
+      });
+      if (!destinationPath) return;
       const result = await generatePdfExport(project.id, {
-        packetVersionId: selectedPacketVersionId || null,
+        packetVersionId: exportMode === "zip_archive" ? null : selectedPacketVersionId || null,
         themeId: selectedThemeId,
         packetTemplateId: selectedTemplateId,
-        filenameTemplate: exportSettings.filename_template,
-        exportMode: exportSettings.export_mode,
+        filenameTemplate: null,
+        exportMode,
+      });
+      await invoke("copy_export_to", {
+        sourcePath: result.absolute_path,
+        destinationPath,
       });
       setExportResult(result);
+      setSavedExportPath(destinationPath);
       onComplete();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The packet could not be exported.");
@@ -161,7 +180,7 @@ export function ReviewExportPage({
         packetVersionId: selectedPacketVersionId || null,
         themeId: selectedThemeId,
         packetTemplateId: selectedTemplateId,
-        filenameTemplate: exportSettings.filename_template,
+        filenameTemplate: null,
         exportMode: "single_pdf",
       });
       setPreviewUrl(URL.createObjectURL(blob));
@@ -222,11 +241,11 @@ export function ReviewExportPage({
   }
 
   async function handleOpenExport() {
-    if (!exportResult) return;
+    if (!exportResult && !savedExportPath) return;
     setOpening(true);
     setError("");
     try {
-      await invoke("open_path", { path: exportResult.absolute_path });
+      await invoke("open_path", { path: savedExportPath || exportResult?.absolute_path });
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -235,18 +254,6 @@ export function ReviewExportPage({
       );
     } finally {
       setOpening(false);
-    }
-  }
-
-  async function handleSelectFolder() {
-    setError("");
-    try {
-      const folder = await invoke<string | null>("select_folder");
-      if (folder) {
-        await saveExportOptions({ ...exportSettings, last_export_location: folder });
-      }
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "The save folder could not be selected.");
     }
   }
 
@@ -355,17 +362,8 @@ export function ReviewExportPage({
         </div>
 
         <aside className="xl:sticky xl:top-6">
-          <Card title="Export options" description="Choose how and where the packet is saved.">
+          <Card title="Export options" description="Choose a PDF or ZIP. Windows will ask where to save it.">
             <div className="space-y-4">
-              <label className="text-sm font-semibold text-[var(--theme-text)]">
-                Filename
-                <input
-                  className="mt-2 w-full rounded-xl border border-[var(--theme-border)] bg-white px-3.5 py-2.5 text-sm shadow-sm outline-none focus:border-[var(--theme-primary)] focus:ring-2 focus:ring-[var(--theme-primary-soft)]"
-                  placeholder={`${project.student?.name || "Student"} - ${project.school_year || "School Year"}`}
-                  value={exportSettings.filename_template}
-                  onChange={(event) => void saveExportOptions({ ...exportSettings, filename_template: event.target.value })}
-                />
-              </label>
               <label className="text-sm font-semibold text-[var(--theme-text)]">
                 Export mode
                 <select
@@ -374,26 +372,14 @@ export function ReviewExportPage({
                   onChange={(event) => void saveExportOptions({ ...exportSettings, export_mode: event.target.value as ExportMode })}
                 >
                   <option value="single_pdf">Single PDF</option>
-                  <option value="zip_archive">ZIP Archive of All</option>
+                  <option value="zip_archive">ZIP archive of all</option>
                 </select>
               </label>
-              <label className="text-sm font-semibold text-[var(--theme-text)]">
-                Save to
-                <input
-                  className="mt-2 w-full rounded-xl border border-[var(--theme-border)] bg-white px-3.5 py-2.5 text-sm shadow-sm outline-none focus:border-[var(--theme-primary)] focus:ring-2 focus:ring-[var(--theme-primary-soft)]"
-                  readOnly
-                  placeholder="Choose a folder..."
-                  value={exportSettings.last_export_location}
-                />
-              </label>
-              <Button className="w-full justify-center" variant="outline" onClick={() => void handleSelectFolder()}>
-                Save to...
-              </Button>
             </div>
           </Card>
           <Card title="Generate PDF" description="Uses WeasyPrint through FastAPI." className="mt-5">
             <p className="text-sm leading-6 text-[var(--theme-text-muted)]">
-              Export includes the cover page, At-a-Glance, placeholders for future accommodations and behavior plans, goal summary, service areas, and data collection pages.
+              Export includes the visible packet pages from Packet Designer. The export button opens a Windows save window for the file name and location.
             </p>
             <Button
               className="mt-5 w-full justify-center"
@@ -408,7 +394,7 @@ export function ReviewExportPage({
               disabled={!validation.is_complete || previewing || exporting}
               onClick={() => void handleExport()}
             >
-              {exporting ? "Exporting..." : exportSettings.export_mode === "zip_archive" ? "Export ZIP" : "Export PDF"}
+              {exporting ? "Exporting..." : exportSettings.export_mode === "zip_archive" ? "Export ZIP..." : "Export PDF..."}
             </Button>
             {previewUrl && (
               <div className="mt-4 overflow-hidden rounded-xl border border-[var(--theme-border)] bg-white">
@@ -416,7 +402,12 @@ export function ReviewExportPage({
               </div>
             )}
             {exportResult && (
-              <div className="mt-5 flex flex-wrap gap-2">
+              <div className="mt-5 space-y-3">
+                <div className="rounded-xl border border-[var(--theme-border)] bg-[var(--theme-surface-muted)] p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--theme-text-muted)]">Latest export</p>
+                  <p className="mt-1 break-all text-xs text-[var(--theme-text)]">{savedExportPath || exportResult.absolute_path}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
                 <Button disabled={opening} onClick={() => void handleOpenExport()}>
                   {opening ? "Opening..." : exportSettings.export_mode === "zip_archive" ? "Open ZIP" : "Open PDF"}
                 </Button>
@@ -427,6 +418,7 @@ export function ReviewExportPage({
                 >
                   Download
                 </a>
+                </div>
               </div>
             )}
           </Card>

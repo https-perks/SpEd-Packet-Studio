@@ -25,6 +25,7 @@ from backend.schemas.projects import (
     PacketTemplateLibraryDraft,
     PacketTemplateLibraryItem,
     PacketTemplateOption,
+    TemplatePreviewRequest,
     ProjectCreate,
     ProjectDetail,
     ProjectSummary,
@@ -78,6 +79,11 @@ def list_template_library() -> list[PacketTemplateLibraryItem]:
     return projects.list_template_library()
 
 
+@router.get("/template-library/hidden", response_model=list[PacketTemplateLibraryItem])
+def list_hidden_template_library() -> list[PacketTemplateLibraryItem]:
+    return projects.list_hidden_template_library()
+
+
 @router.post("/template-library", response_model=PacketTemplateLibraryItem, status_code=201)
 def create_template_library_item(value: PacketTemplateLibraryDraft) -> PacketTemplateLibraryItem:
     return projects.create_template_library_item(value)
@@ -101,9 +107,23 @@ def set_default_template(template_id: str) -> list[PacketTemplateLibraryItem]:
     return projects.set_default_template(template_id)
 
 
+@router.post("/template-library/{template_id}/restore", response_model=list[PacketTemplateLibraryItem])
+def restore_template_library_item(template_id: str) -> list[PacketTemplateLibraryItem]:
+    return projects.restore_template_library_item(template_id)
+
+
 @router.delete("/template-library/{template_id}", status_code=204)
 def delete_template_library_item(template_id: str) -> None:
     projects.delete_template_library_item(template_id)
+
+
+@router.post("/template-library/preview")
+def preview_template_library_item(value: TemplatePreviewRequest) -> Response:
+    return Response(
+        projects.preview_template_library_item(value),
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'inline; filename="template-preview.pdf"'},
+    )
 
 
 @router.get("/brand-kits", response_model=list[BrandKitLibraryItem])

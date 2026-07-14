@@ -61,12 +61,40 @@ export interface ServiceAreaDraft {
   position: number;
 }
 
+export interface AccommodationDraft {
+  id?: string | null;
+  content_area: string;
+  custom_content_area: string;
+  text: string;
+  position: number;
+}
+
+export interface BehaviorPlanSectionDraft {
+  id?: string | null;
+  title: string;
+  text: string;
+  position: number;
+}
+
+export interface RelatedServiceProviderDraft {
+  id?: string | null;
+  name: string;
+  email: string;
+  phone: string;
+  service_area: string;
+  position: number;
+}
+
 export interface StudentSetupDraft {
   project_name: string;
   school_year: string;
   student: StudentDraft;
   service_areas: ServiceAreaDraft[];
   audiences: Audience[];
+  accommodations: AccommodationDraft[];
+  behavior_plan: string;
+  behavior_plan_sections: BehaviorPlanSectionDraft[];
+  related_service_providers: RelatedServiceProviderDraft[];
 }
 
 export interface GoalDraft {
@@ -179,6 +207,7 @@ export interface PacketTemplateLibraryItem extends PacketTemplateOption {
   customization: ThemeCustomization;
   is_builtin: boolean;
   is_default: boolean;
+  is_hidden: boolean;
 }
 
 export interface PacketTemplateLibraryDraft {
@@ -220,6 +249,8 @@ export interface BrandKit {
   watermark_logo_filename: string;
   watermark_enabled: boolean;
   default_fonts: string;
+  heading_font: string;
+  body_font: string;
   primary_color: string;
   secondary_color: string;
   accent_color: string;
@@ -244,6 +275,8 @@ export interface BrandKitLibraryDraft {
   watermark_logo_filename: string;
   watermark_enabled: boolean;
   default_fonts: string;
+  heading_font: string;
+  body_font: string;
   primary_color: string;
   secondary_color: string;
   accent_color: string;
@@ -275,6 +308,7 @@ export interface AppSettings {
   default_packet_pages: PacketPageDraft[];
   default_observation_checklist: string[];
   default_data_sheet_columns: DataSheetColumnDraft[];
+  data_sheet_templates: DataSheetDraft[];
   service_area_presets: ServiceAreaDraft[];
   case_manager_profile: CaseManagerProfile;
 }
@@ -329,6 +363,10 @@ export interface ProjectDetail {
   readonly student: (StudentDraft & { readonly id: string }) | null;
   readonly service_areas: readonly (ServiceAreaDraft & { readonly id: string })[];
   readonly audiences: readonly Audience[];
+  readonly accommodations: readonly AccommodationDraft[];
+  readonly behavior_plan: string;
+  readonly behavior_plan_sections: readonly BehaviorPlanSectionDraft[];
+  readonly related_service_providers: readonly RelatedServiceProviderDraft[];
   readonly packet_versions: readonly PacketVersion[];
   readonly packet_builder: readonly PacketVersionConfig[];
   readonly observation_checklist: readonly string[];

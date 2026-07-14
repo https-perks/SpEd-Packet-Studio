@@ -193,6 +193,10 @@ export function listTemplateLibrary() {
   return apiGet<PacketTemplateLibraryItem[]>("/projects/template-library");
 }
 
+export function listHiddenTemplateLibrary() {
+  return apiGet<PacketTemplateLibraryItem[]>("/projects/template-library/hidden");
+}
+
 export function createTemplateLibraryItem(value: PacketTemplateLibraryDraft) {
   return apiRequest<PacketTemplateLibraryItem>("/projects/template-library", {
     method: "POST",
@@ -219,10 +223,32 @@ export function setDefaultTemplateLibraryItem(templateId: string) {
   });
 }
 
+export function restoreTemplateLibraryItem(templateId: string) {
+  return apiRequest<PacketTemplateLibraryItem[]>(`/projects/template-library/${templateId}/restore`, {
+    method: "POST",
+  });
+}
+
 export function deleteTemplateLibraryItem(templateId: string) {
   return apiRequest<void>(`/projects/template-library/${templateId}`, {
     method: "DELETE",
   });
+}
+
+export async function previewTemplateLibraryItem(value: PacketTemplateLibraryDraft) {
+  const response = await fetch(`${API_BASE_URL}/projects/template-library/preview`, {
+    method: "POST",
+    headers: {
+      Accept: "application/pdf",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(value),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { detail?: unknown } | null;
+    throw new Error(typeof body?.detail === "string" ? body.detail : "The template preview could not be created.");
+  }
+  return response.blob();
 }
 
 export function listBrandKits() {

@@ -4,6 +4,7 @@ import base64
 import binascii
 from copy import deepcopy
 from datetime import date, datetime, timezone
+from functools import lru_cache
 import hashlib
 from html import escape
 from io import BytesIO
@@ -22,9 +23,12 @@ from backend.config import settings
 from backend.generators.pdf import PdfRenderRequest, render_pdf
 from backend.models import AtAGlance, DataSheet, Export, Goal, PacketVersion, Project, ServiceArea, Student
 from backend.schemas.projects import (
+    AccommodationDraft,
     AtAGlanceDraft,
     AtAGlanceResponse,
+    AtAGlanceSectionDraft,
     BackupResponse,
+    BehaviorPlanSectionDraft,
     BrandKit,
     BrandKitLibraryDraft,
     BrandKitLibraryItem,
@@ -32,8 +36,10 @@ from backend.schemas.projects import (
     BrandLogoUpload,
     BulkProjectAction,
     BulkProjectActionResponse,
+    DataSheetDraft,
     DataSheetResponse,
     DataSheetsDraft,
+    DEFAULT_SERVICE_AREA_COLORS,
     DuplicateOptions,
     ExportSettings,
     ExportSettingsSelection,
@@ -48,9 +54,11 @@ from backend.schemas.projects import (
     PacketTemplateLibraryDraft,
     PacketTemplateLibraryItem,
     PacketTemplateOption,
+    TemplatePreviewRequest,
     PacketVersionResponse,
     PacketVersionConfig,
     AssetPlacementDraft,
+    RelatedServiceProviderDraft,
     AppSettings,
     ProjectDetail,
     ProjectSummary,
@@ -114,8 +122,51 @@ DEFAULT_SERVICE_AREA_PRESETS = [
     ServiceAreaDraft(name="Self-Help/Independence", position=4),
 ]
 
+MINIMAL_SERVICE_AREA_COLOR = "#4B5563"
+
 DEFAULT_DATA_SHEET_COLUMN_DRAFTS = [
     DataSheetColumnDraft(**column) for column in DEFAULT_DATA_SHEET_COLUMNS
+]
+
+DEFAULT_DATA_SHEET_TEMPLATES = [
+    DataSheetDraft(
+        id="template_trial_probe",
+        title="Skill Probe",
+        sheet_type="trial_count",
+        goal_ids=[],
+        collection_schedule="Weekly",
+        blank_instance_count=1,
+        columns=[
+            DataSheetColumnDraft(id="date", title="Date", column_type="date", position=0),
+            DataSheetColumnDraft(id="trial", title="Trial", column_type="text", position=1),
+            DataSheetColumnDraft(id="result", title="Result", column_type="text", position=2),
+            DataSheetColumnDraft(id="notes", title="Notes", column_type="notes", position=3),
+        ],
+        notes="Use one row per probe or trial.",
+        template_name="Skill Probe",
+        is_template=True,
+        is_observation_form=False,
+        position=0,
+    ),
+    DataSheetDraft(
+        id="template_frequency",
+        title="Frequency Tracker",
+        sheet_type="frequency",
+        goal_ids=[],
+        collection_schedule="Daily",
+        blank_instance_count=1,
+        columns=[
+            DataSheetColumnDraft(id="date", title="Date", column_type="date", position=0),
+            DataSheetColumnDraft(id="activity", title="Activity / Setting", column_type="text", position=1),
+            DataSheetColumnDraft(id="count", title="Count", column_type="number", position=2),
+            DataSheetColumnDraft(id="notes", title="Notes", column_type="notes", position=3),
+        ],
+        notes="Track frequency across settings or instructional blocks.",
+        template_name="Frequency Tracker",
+        is_template=True,
+        is_observation_form=False,
+        position=1,
+    ),
 ]
 
 THEME_OPTIONS = [
@@ -531,6 +582,7 @@ def _app_settings_default() -> AppSettings:
         default_packet_pages=_default_packet_pages_from(DEFAULT_PACKET_PAGES),
         default_observation_checklist=DEFAULT_OBSERVATION_CHECKLIST,
         default_data_sheet_columns=DEFAULT_DATA_SHEET_COLUMN_DRAFTS,
+        data_sheet_templates=DEFAULT_DATA_SHEET_TEMPLATES,
         service_area_presets=DEFAULT_SERVICE_AREA_PRESETS,
     )
 
@@ -563,6 +615,8 @@ def get_app_settings() -> AppSettings:
         loaded.default_observation_checklist = defaults.default_observation_checklist
     if not loaded.default_data_sheet_columns:
         loaded.default_data_sheet_columns = defaults.default_data_sheet_columns
+    if not loaded.data_sheet_templates:
+        loaded.data_sheet_templates = defaults.data_sheet_templates
     loaded.default_theme_id = _resolve_theme_id(loaded.default_theme_id)
     if _template_library_item(loaded.default_packet_template_id) is None:
         loaded.default_packet_template_id = "modern_professional"
@@ -585,6 +639,24 @@ def save_app_settings(value: AppSettings) -> AppSettings:
         normalized.default_data_sheet_columns or DEFAULT_DATA_SHEET_COLUMN_DRAFTS,
         key=lambda column: column.position,
     )
+    normalized.data_sheet_templates = [
+        template.model_copy(
+            update={
+                "position": position,
+                "goal_ids": [],
+                "columns": sorted(template.columns or DEFAULT_DATA_SHEET_COLUMN_DRAFTS, key=lambda column: column.position),
+                "template_name": template.template_name.strip() or template.title.strip() or "Data Sheet Template",
+                "is_template": True,
+                "is_observation_form": False,
+            }
+        )
+        for position, template in enumerate(
+            sorted(
+                [template for template in normalized.data_sheet_templates if template.title.strip() or template.template_name.strip()],
+                key=lambda template: template.position,
+            )
+        )
+    ] or DEFAULT_DATA_SHEET_TEMPLATES
     normalized.service_area_presets = sorted(
         normalized.service_area_presets,
         key=lambda area: area.position,
@@ -771,9 +843,28 @@ def delete_theme_palette(theme_id: str) -> None:
     _save_custom_themes(remaining)
 
 
-def _builtin_template_library_items() -> list[PacketTemplateLibraryItem]:
+def _hidden_builtin_template_ids() -> set[str]:
+    value = _read_library("templates.json").get("hidden_builtin_template_ids")
+    valid_ids = {template.id for template in PACKET_TEMPLATE_OPTIONS}
+    if not isinstance(value, list):
+        return set()
+    return {str(item) for item in value if str(item) in valid_ids}
+
+
+def _template_default_id(default_id: str | None = None, hidden_ids: set[str] | None = None) -> str:
+    hidden = hidden_ids if hidden_ids is not None else _hidden_builtin_template_ids()
+    candidate = str(default_id or _read_library("templates.json").get("default_template_id") or "modern_professional")
+    custom_ids = [item.id for item in _custom_template_library_items()]
+    visible_ids = [template.id for template in PACKET_TEMPLATE_OPTIONS if template.id not in hidden] + custom_ids
+    if candidate in visible_ids:
+        return candidate
+    return visible_ids[0] if visible_ids else "modern_professional"
+
+
+def _builtin_template_library_items(include_hidden: bool = False) -> list[PacketTemplateLibraryItem]:
     default_id = str(_read_library("templates.json").get("default_template_id") or "modern_professional")
     overrides = _template_overrides()
+    hidden_ids = _hidden_builtin_template_ids()
     return [
         (
             overrides.get(template.id)
@@ -791,9 +882,11 @@ def _builtin_template_library_items() -> list[PacketTemplateLibraryItem]:
                 "base_template_id": template.id,
                 "is_builtin": True,
                 "is_default": template.id == default_id,
+                "is_hidden": template.id in hidden_ids,
             }
         )
         for template in PACKET_TEMPLATE_OPTIONS
+        if include_hidden or template.id not in hidden_ids
     ]
 
 
@@ -844,11 +937,13 @@ def _custom_template_library_items() -> list[PacketTemplateLibraryItem]:
 def _save_custom_templates(items: list[PacketTemplateLibraryItem], default_id: str | None = None) -> None:
     library = _read_library("templates.json")
     current_default = str(library.get("default_template_id") or "modern_professional")
+    hidden_ids = _hidden_builtin_template_ids()
     _write_library(
         "templates.json",
         {
-            "default_template_id": default_id or current_default,
+            "default_template_id": _template_default_id(default_id or current_default, hidden_ids),
             "overrides": library.get("overrides") if isinstance(library.get("overrides"), dict) else {},
+            "hidden_builtin_template_ids": sorted(hidden_ids),
             "items": [
                 item.model_copy(update={"is_builtin": False, "is_default": False}).model_dump(mode="json")
                 for item in items
@@ -861,10 +956,12 @@ def _save_template_overrides(overrides: dict[str, PacketTemplateLibraryItem]) ->
     library = _read_library("templates.json")
     items = _custom_template_library_items()
     current_default = str(library.get("default_template_id") or "modern_professional")
+    hidden_ids = _hidden_builtin_template_ids()
     _write_library(
         "templates.json",
         {
-            "default_template_id": current_default,
+            "default_template_id": _template_default_id(current_default, hidden_ids),
+            "hidden_builtin_template_ids": sorted(hidden_ids),
             "overrides": {
                 template_id: item.model_copy(
                     update={
@@ -872,6 +969,7 @@ def _save_template_overrides(overrides: dict[str, PacketTemplateLibraryItem]) ->
                         "base_template_id": template_id,
                         "is_builtin": True,
                         "is_default": False,
+                        "is_hidden": template_id in hidden_ids,
                     }
                 ).model_dump(mode="json")
                 for template_id, item in overrides.items()
@@ -886,8 +984,17 @@ def _save_template_overrides(overrides: dict[str, PacketTemplateLibraryItem]) ->
 
 def list_template_library() -> list[PacketTemplateLibraryItem]:
     items = _builtin_template_library_items() + _custom_template_library_items()
-    default_id = str(_read_library("templates.json").get("default_template_id") or "modern_professional")
+    default_id = _template_default_id()
     return [item.model_copy(update={"is_default": item.id == default_id}) for item in items]
+
+
+def list_hidden_template_library() -> list[PacketTemplateLibraryItem]:
+    hidden_ids = _hidden_builtin_template_ids()
+    return [
+        item.model_copy(update={"is_default": False, "is_hidden": True})
+        for item in _builtin_template_library_items(include_hidden=True)
+        if item.id in hidden_ids
+    ]
 
 
 def list_packet_templates() -> list[PacketTemplateOption]:
@@ -906,7 +1013,9 @@ def list_packet_templates() -> list[PacketTemplateOption]:
 
 
 def _template_library_item(template_id: str) -> PacketTemplateLibraryItem | None:
-    return next((item for item in list_template_library() if item.id == template_id), None)
+    items = _builtin_template_library_items(include_hidden=True) + _custom_template_library_items()
+    default_id = _template_default_id()
+    return next((item.model_copy(update={"is_default": item.id == default_id}) for item in items if item.id == template_id), None)
 
 
 def _packet_template_base_id(template_id: str) -> str:
@@ -1016,7 +1125,22 @@ def duplicate_template_library_item(template_id: str) -> PacketTemplateLibraryIt
 
 def delete_template_library_item(template_id: str) -> None:
     if any(template.id == template_id for template in PACKET_TEMPLATE_OPTIONS):
-        raise HTTPException(status_code=409, detail="Built-in templates cannot be deleted.")
+        hidden_ids = _hidden_builtin_template_ids()
+        hidden_ids.add(template_id)
+        library = _read_library("templates.json")
+        _write_library(
+            "templates.json",
+            {
+                "default_template_id": _template_default_id(library.get("default_template_id"), hidden_ids),
+                "overrides": library.get("overrides") if isinstance(library.get("overrides"), dict) else {},
+                "hidden_builtin_template_ids": sorted(hidden_ids),
+                "items": [
+                    item.model_copy(update={"is_builtin": False, "is_default": False}).model_dump(mode="json")
+                    for item in _custom_template_library_items()
+                ],
+            },
+        )
+        return
     items = _custom_template_library_items()
     remaining = [item for item in items if item.id != template_id]
     if len(remaining) == len(items):
@@ -1026,9 +1150,32 @@ def delete_template_library_item(template_id: str) -> None:
 
 
 def set_default_template(template_id: str) -> list[PacketTemplateLibraryItem]:
-    if _template_library_item(template_id) is None:
+    if next((item for item in list_template_library() if item.id == template_id), None) is None:
         raise HTTPException(status_code=404, detail="Template not found.")
     _save_custom_templates(_custom_template_library_items(), template_id)
+    return list_template_library()
+
+
+def restore_template_library_item(template_id: str) -> list[PacketTemplateLibraryItem]:
+    if not any(template.id == template_id for template in PACKET_TEMPLATE_OPTIONS):
+        raise HTTPException(status_code=404, detail="Template not found.")
+    hidden_ids = _hidden_builtin_template_ids()
+    if template_id not in hidden_ids:
+        return list_template_library()
+    hidden_ids.remove(template_id)
+    library = _read_library("templates.json")
+    _write_library(
+        "templates.json",
+        {
+            "default_template_id": _template_default_id(library.get("default_template_id"), hidden_ids),
+            "overrides": library.get("overrides") if isinstance(library.get("overrides"), dict) else {},
+            "hidden_builtin_template_ids": sorted(hidden_ids),
+            "items": [
+                item.model_copy(update={"is_builtin": False, "is_default": False}).model_dump(mode="json")
+                for item in _custom_template_library_items()
+            ],
+        },
+    )
     return list_template_library()
 
 
@@ -1088,7 +1235,9 @@ def create_brand_kit(draft: BrandKitLibraryDraft) -> BrandKitLibraryItem:
         watermark_logo_relative_path=draft.watermark_logo_relative_path,
         watermark_logo_filename=draft.watermark_logo_filename,
         watermark_enabled=draft.watermark_enabled,
-        default_fonts=draft.default_fonts,
+        default_fonts=draft.default_fonts or draft.body_font or draft.heading_font,
+        heading_font=draft.heading_font or draft.default_fonts or "Poppins",
+        body_font=draft.body_font or draft.default_fonts or "Open Sans",
         primary_color=draft.primary_color,
         secondary_color=draft.secondary_color,
         accent_color=draft.accent_color,
@@ -1121,7 +1270,9 @@ def update_brand_kit(brand_kit_id: str, draft: BrandKitLibraryDraft) -> BrandKit
             "watermark_logo_relative_path": draft.watermark_logo_relative_path or current.watermark_logo_relative_path,
             "watermark_logo_filename": draft.watermark_logo_filename or current.watermark_logo_filename,
             "watermark_enabled": draft.watermark_enabled,
-            "default_fonts": draft.default_fonts,
+            "default_fonts": draft.default_fonts or draft.body_font or draft.heading_font,
+            "heading_font": draft.heading_font or draft.default_fonts or current.heading_font,
+            "body_font": draft.body_font or draft.default_fonts or current.body_font,
             "primary_color": draft.primary_color,
             "secondary_color": draft.secondary_color,
             "accent_color": draft.accent_color,
@@ -1239,6 +1390,18 @@ def _customization_from_tokens(theme_id: str) -> ThemeCustomization:
     if override is not None:
         return ThemeCustomization(**override.default_customization)
     tokens = THEME_TOKENS[theme_id if theme_id in THEME_TOKENS else "teacher_friendly"]
+    if theme_id == "minimal":
+        return ThemeCustomization(
+            primary_color=tokens["primary"],
+            secondary_color=tokens["accent"],
+            accent_color=tokens.get("orange", tokens["accent"]),
+            background_color=tokens["soft"],
+            card_color="#ffffff",
+            text_color=tokens.get("text", "#12213a"),
+            service_area_colors={
+                key: MINIMAL_SERVICE_AREA_COLOR for key in DEFAULT_SERVICE_AREA_COLORS
+            },
+        )
     return ThemeCustomization(
         primary_color=tokens["primary"],
         secondary_color=tokens["accent"],
@@ -1247,6 +1410,7 @@ def _customization_from_tokens(theme_id: str) -> ThemeCustomization:
         card_color="#ffffff",
         text_color=tokens.get("text", "#12213a"),
         service_area_colors={
+            **DEFAULT_SERVICE_AREA_COLORS,
             "Reading": tokens.get("blue", tokens["primary"]),
             "Written Expression": tokens.get("green", tokens["accent"]),
             "Speech/Language": tokens.get("purple", tokens["primary"]),
@@ -1257,7 +1421,12 @@ def _customization_from_tokens(theme_id: str) -> ThemeCustomization:
 def _brand_kit(project: Project) -> BrandKit:
     value = (project.settings_json or {}).get("brand_kit")
     if isinstance(value, dict):
-        return BrandKit(**value)
+        stored = BrandKit(**value)
+        if stored.id and stored.id != "personal":
+            library_item = next((item for item in list_brand_kits() if item.id == stored.id), None)
+            if library_item is not None:
+                return BrandKit(**library_item.model_dump(exclude={"is_default"}))
+        return stored
     student = project.student
     return BrandKit(
         school_name=student.school if student and student.school else "",
@@ -1523,8 +1692,88 @@ def _summary(project: Project) -> ProjectSummary:
     )
 
 
+def _accommodations_from_settings(value: object) -> list[AccommodationDraft]:
+    if isinstance(value, list):
+        output: list[AccommodationDraft] = []
+        for position, item in enumerate(value):
+            if not isinstance(item, dict):
+                continue
+            try:
+                parsed = AccommodationDraft(**item)
+            except ValueError:
+                continue
+            output.append(parsed.model_copy(update={"position": parsed.position if parsed.position is not None else position}))
+        return sorted(output, key=lambda item: item.position)
+    if isinstance(value, str) and value.strip():
+        return [
+            AccommodationDraft(
+                content_area="Other",
+                custom_content_area="General",
+                text=value.strip(),
+                position=0,
+            )
+        ]
+    return []
+
+
+def _behavior_plan_sections_from_settings(
+    sections_value: object,
+    legacy_value: object,
+) -> list[BehaviorPlanSectionDraft]:
+    if isinstance(sections_value, list):
+        output: list[BehaviorPlanSectionDraft] = []
+        for position, item in enumerate(sections_value):
+            if not isinstance(item, dict):
+                continue
+            try:
+                parsed = BehaviorPlanSectionDraft(**item)
+            except ValueError:
+                continue
+            output.append(parsed.model_copy(update={"position": parsed.position if parsed.position is not None else position}))
+        return sorted(output, key=lambda item: item.position)
+    if isinstance(legacy_value, str) and legacy_value.strip():
+        return [
+            BehaviorPlanSectionDraft(
+                title="Defined Problem Behavior",
+                text=legacy_value.strip(),
+                position=0,
+            )
+        ]
+    return []
+
+
+def _behavior_plan_text(sections: list[BehaviorPlanSectionDraft], legacy_value: object) -> str:
+    visible = [section for section in sorted(sections, key=lambda item: item.position) if section.text.strip()]
+    if visible:
+        return "\n\n".join(
+            f"{section.title.strip() or 'Behavior Plan'}\n{section.text.strip()}"
+            for section in visible
+        )
+    return str(legacy_value or "")
+
+
+def _related_service_providers_from_settings(value: object) -> list[RelatedServiceProviderDraft]:
+    if not isinstance(value, list):
+        return []
+    output: list[RelatedServiceProviderDraft] = []
+    for position, item in enumerate(value):
+        if not isinstance(item, dict):
+            continue
+        try:
+            parsed = RelatedServiceProviderDraft(**item)
+        except ValueError:
+            continue
+        output.append(parsed.model_copy(update={"position": parsed.position if parsed.position is not None else position}))
+    return sorted(output, key=lambda item: item.position)
+
+
 def _student_setup_from_model(project: Project) -> StudentSetupDraft:
     student = project.student
+    settings_json = project.settings_json or {}
+    behavior_sections = _behavior_plan_sections_from_settings(
+        settings_json.get("behavior_plan_sections"),
+        settings_json.get("behavior_plan"),
+    )
     return StudentSetupDraft(
         project_name=project.name,
         school_year=project.school_year or "",
@@ -1571,6 +1820,10 @@ def _student_setup_from_model(project: Project) -> StudentSetupDraft:
             for version in project.packet_versions
             if version.audience in AUDIENCE_LABELS and version.deleted_at is None
         ],
+        accommodations=_accommodations_from_settings(settings_json.get("accommodations")),
+        behavior_plan=_behavior_plan_text(behavior_sections, settings_json.get("behavior_plan")),
+        behavior_plan_sections=behavior_sections,
+        related_service_providers=_related_service_providers_from_settings(settings_json.get("related_service_providers")),
     )
 
 
@@ -1667,6 +1920,10 @@ def _detail(project: Project) -> ProjectDetail:
             for area in draft.service_areas
         ],
         audiences=draft.audiences,
+        accommodations=draft.accommodations,
+        behavior_plan=draft.behavior_plan,
+        behavior_plan_sections=draft.behavior_plan_sections,
+        related_service_providers=draft.related_service_providers,
         packet_versions=_packet_version_responses(project),
         packet_builder=_packet_builder_configs(project),
         observation_checklist=_observation_checklist(project),
@@ -1849,6 +2106,28 @@ def save_student_setup(
     project.default_export_filename = default_export_filename(
         draft.student.name, project.school_year or ""
     )
+    settings_json = deepcopy(project.settings_json or {})
+    settings_json["accommodations"] = [
+        item.model_copy(update={"position": position}).model_dump(mode="json")
+        for position, item in enumerate(draft.accommodations)
+        if item.text.strip()
+    ]
+    behavior_sections = [
+        item.model_copy(update={"position": position}).model_dump(mode="json")
+        for position, item in enumerate(draft.behavior_plan_sections)
+        if item.text.strip() or item.title.strip()
+    ]
+    settings_json["behavior_plan_sections"] = behavior_sections
+    settings_json["behavior_plan"] = _behavior_plan_text(
+        [BehaviorPlanSectionDraft(**item) for item in behavior_sections],
+        draft.behavior_plan,
+    ).strip()
+    settings_json["related_service_providers"] = [
+        provider.model_copy(update={"position": position}).model_dump(mode="json")
+        for position, provider in enumerate(draft.related_service_providers)
+        if provider.name.strip() or provider.email.strip() or provider.phone.strip()
+    ]
+    project.settings_json = settings_json
     _touch(project)
 
     current_areas = {
@@ -2452,11 +2731,20 @@ def _font_stack(font_name: str) -> str:
     return stacks.get(font_name, stacks["Open Sans"])
 
 
+def _brand_body_font(brand_kit: BrandKit) -> str:
+    return brand_kit.body_font or brand_kit.default_fonts or "Open Sans"
+
+
+def _brand_heading_font(brand_kit: BrandKit) -> str:
+    return brand_kit.heading_font or brand_kit.default_fonts or "Poppins"
+
+
 def _packet_styles(
     theme_id: str,
     customization: ThemeCustomization | None = None,
     watermark_src: str = "",
-    font_name: str = "",
+    body_font_name: str = "",
+    heading_font_name: str = "",
 ) -> str:
     tokens = dict(THEME_TOKENS.get(theme_id, THEME_TOKENS["teacher_friendly"]))
     if customization is not None:
@@ -2492,7 +2780,7 @@ def _packet_styles(
     }
     h1, h2, h3, h4 {
       color: __PRIMARY__;
-      font-family: "Poppins", "Segoe UI", Arial, sans-serif;
+      font-family: __HEADING_FONT__;
       line-height: 1.12;
       margin: 0;
     }
@@ -2513,19 +2801,17 @@ def _packet_styles(
     }
     .page:last-child { break-after: auto; }
     body.has-watermark .page:not(.cover)::after {
-      background: url("__WATERMARK_SRC__") center center / 3.15in auto no-repeat;
-      bottom: 0.35in;
+      background: url("__WATERMARK_SRC__") center center / contain no-repeat;
       content: "";
-      left: 0.35in;
-      opacity: 0.055;
+      height: 4.25in;
+      left: 50%;
+      opacity: 0.04;
+      pointer-events: none;
       position: absolute;
-      right: 0.35in;
-      top: 0.35in;
-      z-index: 0;
-    }
-    body.has-watermark .page:not(.cover) > * {
-      position: relative;
-      z-index: 1;
+      top: 4.775in;
+      transform: translate(-50%, -50%);
+      width: 4.25in;
+      z-index: 20;
     }
     .page-header {
       align-items: center;
@@ -2543,17 +2829,52 @@ def _packet_styles(
       background: __BLUE__;
       border-radius: 999px;
       color: white;
-      display: inline-flex;
-      font-family: "Poppins", "Segoe UI", Arial, sans-serif;
+      display: inline-block;
+      font-family: __HEADING_FONT__;
       font-size: 14px;
       font-weight: 800;
       height: 32px;
       justify-content: center;
+      line-height: 32px;
+      overflow: hidden;
+      position: relative;
+      text-align: center;
+      vertical-align: middle;
       width: 32px;
     }
     .badge.green { background: __GREEN__; }
     .badge.purple { background: __PURPLE__; }
     .badge.orange { background: __ORANGE__; }
+    .service-icon-badge {
+      background-position: center 47%;
+      background-repeat: no-repeat;
+      background-size: 60% auto;
+      color: transparent !important;
+      font-size: 0;
+    }
+    .page-header .service-icon-badge {
+      background-size: 42% auto;
+      background-position: center center;
+    }
+    .page-icon-badge {
+      color: transparent !important;
+      font-size: 0;
+    }
+    .page-icon-badge img {
+      display: block;
+      height: 19px;
+      margin: 6.5px auto;
+      object-fit: contain;
+      width: 19px;
+    }
+    .page-icon-img-observation {
+      margin-left: 7.5px !important;
+      margin-right: 5.5px !important;
+    }
+    .page-icon-img-service-info {
+      margin-left: 7.5px !important;
+      margin-right: 5.5px !important;
+    }
     .eyebrow {
       color: __ACCENT__;
       font-size: 9px;
@@ -2573,6 +2894,70 @@ def _packet_styles(
       overflow: hidden;
       padding: 0;
     }
+    .service-area-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      column-gap: 16px;
+      row-gap: 12px;
+      margin: 14px 0 20px;
+    }
+    .service-area-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      background: #f8fafc;
+      border: 1px solid #dbe5ef;
+      border-radius: 10px;
+      box-sizing: border-box;
+      min-height: 40px;
+      height: 40px;
+    }
+    .service-area-card .mini-dot {
+      align-items: center;
+      border-radius: 50%;
+      display: flex;
+      flex: 0 0 30px;
+      height: 30px;
+      justify-content: center;
+      line-height: 0;
+      overflow: hidden;
+      position: relative;
+      width: 30px;
+    }
+    .service-area-card .mini-dot.blue {
+      background: __BLUE__;
+    }
+    .service-area-card .mini-dot.green {
+      background: __GREEN__;
+    }
+    .service-area-card .mini-dot.purple {
+      background: __PURPLE__;
+    }
+    .service-area-card .mini-dot.orange {
+      background: __ORANGE__;
+    }
+    .service-area-card .mini-dot .service-icon-img {
+      display: block;
+      height: 58%;
+      left: 50%;
+      margin: 0;
+      object-fit: contain;
+      position: absolute;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 58%;
+    }
+    .service-area-name {
+      display: flex;
+      align-items: center;
+      height: 100%;
+      flex: 1;
+      font-size: 10pt;
+      font-weight: 600;
+      line-height: 1.2;
+      color: #1f2937;
+    }
     .cover-card {
       border: 0;
       border-radius: 0;
@@ -2591,13 +2976,15 @@ def _packet_styles(
       border-radius: 999px;
       color: #64ddd8;
       display: flex;
-      font-family: "Poppins", "Segoe UI", Arial, sans-serif;
+      font-family: __HEADING_FONT__;
       font-size: 20px;
       font-weight: 900;
       height: 64px;
       justify-content: center;
       letter-spacing: 0.02em;
       margin: 0 auto 18px;
+      position: relative;
+      overflow: hidden;
       width: 64px;
     }
     .brand-logo {
@@ -2642,7 +3029,7 @@ def _packet_styles(
       background: __TEAL__;
       color: white;
       display: inline-block;
-      font-family: "Poppins", "Segoe UI", Arial, sans-serif;
+      font-family: __HEADING_FONT__;
       font-size: 17px;
       font-weight: 800;
       margin: 18px 0 30px;
@@ -2650,7 +3037,7 @@ def _packet_styles(
     }
     .cover-student {
       color: #64ddd8;
-      font-family: "Poppins", "Segoe UI", Arial, sans-serif;
+      font-family: __HEADING_FONT__;
       font-size: 23px;
       font-weight: 800;
       letter-spacing: 0.02em;
@@ -2666,36 +3053,170 @@ def _packet_styles(
       width: 100%;
     }
     .cover-services {
-      align-items: flex-start;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 14px;
-      justify-content: center;
-      margin: 26px 0 22px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: nowrap;
+    width: 100%;
+    max-width: 5.9in;
+    margin: 18px auto;
+    gap: 0;
     }
+
     .service-chip {
-      align-items: center;
-      color: white;
-      display: inline-flex;
-      flex-direction: column;
-      font-size: 9px;
-      font-weight: 700;
-      gap: 7px;
-      max-width: 86px;
-      text-align: center;
-      text-transform: uppercase;
+    align-items: center;
+    color: white;
+    display: inline-flex;
+    flex-direction: column;
+    flex: 0 0 0.58in;
+    width: 0.58in;
+    font-size: 6.5px;
+    font-weight: 700;
+    gap: 5px;
+    line-height: 1.05;
+    text-align: center;
+    text-transform: uppercase;
+    box-sizing: border-box;
+    }
+
+    .service-chip > span:last-child {
+    display: block;
+    width: 100%;
+    min-height: 24px;
+    line-height: 1.05;
     }
     .chip-dot {
-      align-items: center;
+    align-items: center;
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 999px;
+    color: #ffffff;
+    display: inline-block;
+    height: 46px;
+    line-height: 46px;
+    position: relative;
+    text-align: center;
+    width: 46px;
+    }
+    .cover .chip-dot {
       background: rgba(255,255,255,0.12);
       border: 1px solid rgba(255,255,255,0.25);
-      border-radius: 999px;
-      color: #64ddd8;
-      display: inline-flex;
-      font-size: 18px;
-      height: 46px;
+      color: white;
+    }
+    .cover-simple-icon {
+      align-items: center;
+      display: flex;
+      height: 100%;
       justify-content: center;
-      width: 46px;
+      width: 100%;
+    }
+    .cover-simple-icon svg {
+      display: block;
+      height: 23px;
+      width: 23px;
+    }
+    .service-icon-img {
+      display: block;
+      object-fit: contain;
+    }
+    .chip-dot .service-icon-img,
+    .badge .service-icon-img,
+    .cover-icon .service-icon-img {
+      height: 58%;
+      left: 50%;
+      position: absolute;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 58%;
+    }
+    .chip-dot .cover-service-icon {
+      height: 62%;
+      width: 62%;
+    }
+    .mini-dot {
+      align-items: center;
+      display: inline-flex;
+      justify-content: center;
+      line-height: 0;
+      overflow: hidden;
+      position: relative;
+    }
+    
+    /* ==========================
+    5 Services
+    ========================== */
+    .cover-services.service-count-5 {
+      gap: 12px 18px;
+      margin: 20px auto 18px;
+      max-width: 5.8in;
+    }
+    .cover-services.service-count-5 .service-chip {
+      font-size: 7.8px;
+      gap: 6px;
+      max-width: 0.75in;
+    }
+    .cover-services.service-count-5 .chip-dot {
+      width: 40px;
+      height: 40px;
+    }
+    /* ==========================
+    6 Services
+    ========================== */
+    .cover-services.service-count-6 {
+      gap: 10px 16px;
+      margin: 18px auto;
+      max-width: 5.8in;
+    }
+    .cover-services.service-count-6 .service-chip {
+      font-size: 7.4px;
+      gap: 5px;
+      max-width: 0.70in;
+    }
+    .cover-services.service-count-6 .chip-dot {
+      width: 38px;
+      height: 38px;
+    }
+    /* ==========================
+    7 Services
+    ========================== */
+    .cover-services.service-count-7 {
+      gap: 8px 12px;
+      margin: 16px auto;
+      max-width: 5.7in;
+    }
+    .cover-services.service-count-7 .service-chip {
+      font-size: 6.8px;
+      gap: 4px;
+      max-width: 0.64in;
+    }
+    .cover-services.service-count-7 .chip-dot {
+      width: 34px;
+      height: 34px;
+    }
+    /* ==========================
+    8 Services
+    ========================== */
+    .cover-services.service-count-8 {
+      gap: 7px 10px;
+      margin: 14px auto;
+      max-width: 5.7in;
+    }
+    .cover-services.service-count-8 .service-chip {
+      font-size: 6.4px;
+      gap: 3px;
+      max-width: 0.60in;
+    }
+    .cover-services.service-count-8 .chip-dot {
+      width: 32px;
+      height: 32px;
+    }
+    .page-header .badge .service-icon-img {
+      height: 62%;
+      width: 62%;
+      left: 50%;
+      position: absolute;
+      top: 41%;
+      transform: translate(-50%, -50%);
     }
     .mountains {
       bottom: 0;
@@ -2785,18 +3306,49 @@ def _packet_styles(
     .domain-title {
       align-items: center;
       display: flex;
-      gap: 7px;
+      gap: 9px;
       margin: 14px 0 8px;
     }
     .domain-title .mini-dot {
+      align-items: center;
       border-radius: 999px;
-      display: inline-block;
-      height: 14px;
-      width: 14px;
+      display: inline-flex;
+      flex: 0 0 24px;
+      height: 24px;
+      justify-content: center;
+      line-height: 0;
+      overflow: hidden;
+      position: relative;
+      vertical-align: middle;
+      width: 24px;
     }
-    .mini-dot.blue { background: __BLUE__; }
-    .mini-dot.green { background: __GREEN__; }
-    .mini-dot.purple { background: __PURPLE__; }
+    .domain-title .mini-dot.blue {
+      background: __BLUE__;
+      color: #ffffff;
+    }
+    .domain-title .mini-dot.green {
+      background: __GREEN__;
+      color: #ffffff;
+    }
+    .domain-title .mini-dot.purple {
+      background: __PURPLE__;
+      color: #ffffff;
+    }
+    .domain-title .mini-dot.orange {
+      background: __ORANGE__;
+      color: #ffffff;
+    }
+    .domain-title .mini-dot .service-icon-img {
+      display: block;
+      height: 58%;
+      left: 50%;
+      margin: 0;
+      object-fit: contain;
+      position: absolute;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 58%;
+    }
     .goal-card {
       background: __CARD__;
       border: 1px solid __BORDER__;
@@ -3145,7 +3697,12 @@ def _packet_styles(
       z-index: 5;
     }
     body.template-mountain-illustrated .cover-services {
-      margin: 0 0 0.16in;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0 auto 0.16in;
     }
     body.template-mountain-illustrated .cover-bottom .service-chip,
     body.template-mountain-illustrated .cover-bottom .meta-value {
@@ -3154,7 +3711,7 @@ def _packet_styles(
     body.template-mountain-illustrated .cover-bottom .chip-dot {
       background: rgba(8, 43, 67, 0.92);
       border-color: rgba(255,255,255,0.28);
-      box-shadow: 0 5px 14px rgba(0,0,0,0.2);
+      box-shadow: none;
       color: #ffffff;
     }
     body.template-mountain-illustrated .cover-bottom .meta-grid {
@@ -3457,7 +4014,7 @@ def _packet_styles(
     body.template-modern-professional h3,
     body.template-modern-professional h4 {
       color: #0d2848;
-      font-family: "Poppins", "Segoe UI", Arial, sans-serif;
+      font-family: __HEADING_FONT__;
       letter-spacing: 0.01em;
     }
     body.template-modern-professional .cover {
@@ -3683,7 +4240,7 @@ def _packet_styles(
     body.template-district-branding .cover:before {
       color: __BORDER__;
       content: "";
-      font-family: "Poppins", "Segoe UI", Arial, sans-serif;
+      font-family: __HEADING_FONT__;
       font-size: 13px;
       font-weight: 800;
       left: -60px;
@@ -3736,7 +4293,7 @@ def _packet_styles(
     body.template-district-branding .cover-district-mark {
       color: __BORDER__;
       display: block;
-      font-family: "Poppins", "Segoe UI", Arial, sans-serif;
+      font-family: __HEADING_FONT__;
       font-size: 13px;
       font-weight: 800;
       left: -64px;
@@ -3783,6 +4340,25 @@ def _packet_styles(
       padding: 0 8px;
       vertical-align: top;
       width: 25%;
+    }
+    body.template-district-branding .cover-services.service-count-5,
+    body.template-district-branding .cover-services.service-count-6,
+    body.template-district-branding .cover-services.service-count-7,
+    body.template-district-branding .cover-services.service-count-8 {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px 10px;
+    width: 5.5in;
+    }
+
+    body.template-district-branding .cover-services.service-count-5 .service-chip,
+    body.template-district-branding .cover-services.service-count-6 .service-chip,
+    body.template-district-branding .cover-services.service-count-7 .service-chip,
+    body.template-district-branding .cover-services.service-count-8 .service-chip {
+    display: inline-flex;
+    padding: 0;
+    width: 0.62in;
     }
     body.template-district-branding .cover-services .service-chip span:last-child {
       display: block;
@@ -3998,6 +4574,22 @@ def _packet_styles(
       background: #6d3fc0;
       color: #ffffff;
     }
+    .cover .chip-dot,
+    .cover-bottom .chip-dot {
+      color: #ffffff !important;
+    }
+    .page-header .badge,
+    .page-header .badge.blue,
+    .page-header .badge.green,
+    .page-header .badge.purple,
+    .page-header .badge.orange {
+      color: #ffffff !important;
+    }
+    .page-header .badge.service-icon-badge {
+      background-size: 67% auto !important;
+      background-position: center center !important;
+      background-repeat: no-repeat !important;
+    }
     """
     return (
         css.replace("__PRIMARY__", tokens["primary"])
@@ -4015,7 +4607,8 @@ def _packet_styles(
         .replace("__SOFT__", tokens["soft"])
         .replace("__CARD__", tokens.get("card", "#ffffff"))
         .replace("__WATERMARK_SRC__", watermark_src.replace("\\", "/"))
-        .replace("__BODY_FONT__", _font_stack(font_name))
+        .replace("__BODY_FONT__", _font_stack(body_font_name))
+        .replace("__HEADING_FONT__", _font_stack(heading_font_name))
     )
 
 
@@ -4062,6 +4655,207 @@ def _domain_class(value: str) -> str:
     return "blue"
 
 
+def _service_area_color_key(value: str) -> str:
+    lowered = re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+    if "math" in lowered:
+        return "Math"
+    if "read" in lowered:
+        return "Reading"
+    if "written" in lowered or "writing" in lowered or "expression" in lowered:
+        return "Written Expression"
+    if "social" in lowered or "emotional" in lowered or "behavior" in lowered or lowered in {"s e b", "seb"}:
+        return "S/E/B"
+    if "self" in lowered or "independence" in lowered or "independent" in lowered or lowered in {"sh i", "shi"}:
+        return "SH/I"
+    if "communication" in lowered:
+        return "Communication"
+    if "speech" in lowered or "language" in lowered:
+        return "Speech/Language"
+    return value
+
+
+def _service_area_icon_color(
+    value: str,
+    customization: ThemeCustomization | None,
+    *,
+    theme_id: str = "",
+) -> str:
+    if theme_id == "minimal":
+        return MINIMAL_SERVICE_AREA_COLOR
+    colors = dict(DEFAULT_SERVICE_AREA_COLORS)
+    if customization is not None:
+        custom_colors = customization.service_area_colors or {}
+        colors.update(custom_colors)
+        if "Speech-Language" in custom_colors:
+            colors["Speech/Language"] = custom_colors["Speech-Language"]
+        if "Social/Emotional/Behavioral" in custom_colors:
+            colors["S/E/B"] = custom_colors["Social/Emotional/Behavioral"]
+        if "Self-Help/Independence" in custom_colors:
+            colors["SH/I"] = custom_colors["Self-Help/Independence"]
+    key = _service_area_color_key(value)
+    return colors.get(value) or colors.get(key) or "#2563EB"
+
+
+def _service_area_icon_style(
+    value: str,
+    customization: ThemeCustomization | None,
+    *,
+    theme_id: str = "",
+) -> str:
+    return f"background-color: {_service_area_icon_color(value, customization, theme_id=theme_id)};"
+
+
+def _service_icon_key(value: str) -> str:
+    lowered = re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+    if "written" in lowered or "writing" in lowered or "expression" in lowered:
+        return "written-expression"
+    if "speech" in lowered or "language" in lowered:
+        return "speech-lang"
+    if "communication" in lowered:
+        return "communication"
+    if "social" in lowered or "emotional" in lowered or "behavior" in lowered:
+        return "s-e-b"
+    if "self" in lowered or "independence" in lowered or "independent" in lowered:
+        return "sh-i"
+    if "math" in lowered:
+        return "math"
+    if "read" in lowered:
+        return "reading"
+    return "other"
+
+
+@lru_cache(maxsize=4)
+def _cover_icon_markup() -> str:
+    icon_path = Path(__file__).resolve().parents[2] / "assets" / "cover-icon" / "cover.svg"
+    return _svg_icon_img(icon_path, "service-icon-img cover-fallback-icon", "#ffffff")
+
+
+@lru_cache(maxsize=64)
+def _service_icon_img_markup(icon_key: str, class_name: str, color: str, trim_container: bool = False) -> str:
+    icon_path = Path(__file__).resolve().parents[2] / "assets" / "service-icons" / f"{icon_key}.svg"
+    if not icon_path.exists() and icon_key != "other":
+        return _service_icon_img_markup("other", class_name, color, trim_container)
+    return _svg_icon_img(icon_path, class_name, color, trim_container=trim_container)
+
+
+def _svg_icon_source(
+    icon_path: Path,
+    color: str,
+    *,
+    trim_container: bool = False,
+    preserve_fill_none_classes: bool = True,
+) -> str:
+    try:
+        svg = icon_path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    svg = re.sub(r"<\?xml[^>]*>\s*", "", svg)
+    svg = re.sub(r"<!DOCTYPE[^>]*>\s*", "", svg, flags=re.IGNORECASE)
+    svg = re.sub(r"<script\b.*?</script>", "", svg, flags=re.IGNORECASE | re.DOTALL)
+    svg = re.sub(r"\sxmlns=\"[^\"]*\"", "", svg, count=0)
+    svg = re.sub(r"\s(?:width|height)=\"[^\"]*\"", "", svg, count=0)
+    if trim_container:
+        svg = re.sub(r"<path\b[^>]*/>\s*", "", svg, count=1, flags=re.IGNORECASE | re.DOTALL)
+    svg = re.sub(r"\sfill=\"(?!none\")[^\"]*\"", "", svg, flags=re.IGNORECASE)
+    svg = re.sub(r"\sstroke=\"(?!none\")[^\"]*\"", "", svg, flags=re.IGNORECASE)
+    svg = re.sub(
+        r"<svg\b",
+        f'<svg preserveAspectRatio="xMidYMid meet" fill="{color}" color="{color}" xmlns="http://www.w3.org/2000/svg"',
+        svg,
+        count=1,
+    )
+    if preserve_fill_none_classes:
+        recolor_style = (
+            f"path:not(.cls-1),polygon:not(.cls-1),polyline:not(.cls-1),rect:not(.cls-1),"
+            f"circle:not(.cls-1),ellipse:not(.cls-1),line:not(.cls-1){{fill:{color}!important;}}"
+            f"[stroke]:not([stroke='none']){{stroke:{color}!important;}}"
+            ".cls-1{fill:none!important;}"
+        )
+    else:
+        recolor_style = (
+            f"path,polygon,polyline,rect,circle,ellipse,line{{fill:{color}!important;}}"
+            f"[stroke]:not([stroke='none']){{stroke:{color}!important;}}"
+        )
+    svg = re.sub(r"(<svg\b[^>]*>)", rf"\1<style>{recolor_style}</style>", svg, count=1)
+    return svg.strip()
+
+
+def _svg_icon_img(
+    icon_path: Path,
+    class_name: str,
+    color: str,
+    *,
+    trim_container: bool = False,
+    preserve_fill_none_classes: bool = True,
+) -> str:
+    svg = _svg_icon_source(
+        icon_path,
+        color,
+        trim_container=trim_container,
+        preserve_fill_none_classes=preserve_fill_none_classes,
+    )
+    if not svg:
+        return ""
+    encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return f'<img class="{class_name}" src="data:image/svg+xml;base64,{encoded}" alt="">'
+
+
+def _svg_icon_data_uri(
+    icon_path: Path,
+    color: str,
+    *,
+    trim_container: bool = False,
+    preserve_fill_none_classes: bool = True,
+) -> str:
+    svg = _svg_icon_source(
+        icon_path,
+        color,
+        trim_container=trim_container,
+        preserve_fill_none_classes=preserve_fill_none_classes,
+    )
+    if not svg:
+        return ""
+    encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return f"data:image/svg+xml;base64,{encoded}"
+
+
+def _service_icon_img(value: str, *, class_name: str = "service-icon-img", color: str = "#0f2d55", trim_container: bool = False) -> str:
+    markup = _service_icon_img_markup(_service_icon_key(value), class_name, color, trim_container)
+    return markup or escape(_service_symbol(value))
+
+
+def _service_icon_background(value: str, *, color: str = "#ffffff", trim_container: bool = False) -> str:
+    icon_key = _service_icon_key(value)
+    icon_path = Path(__file__).resolve().parents[2] / "assets" / "service-icons" / f"{icon_key}.svg"
+    if not icon_path.exists() and icon_key != "other":
+        icon_path = Path(__file__).resolve().parents[2] / "assets" / "service-icons" / "other.svg"
+    uri = _svg_icon_data_uri(icon_path, color, trim_container=trim_container)
+    return f"background-image: url({uri});" if uri else ""
+
+
+def _page_icon_img(icon_key: str, *, color: str = "#ffffff") -> str:
+    normalized = re.sub(r"[^a-z0-9-]+", "-", icon_key.lower()).strip("-")
+    icon_path = Path(__file__).resolve().parents[2] / "assets" / "page-icons" / f"{normalized}.svg"
+    if not icon_path.exists():
+        return ""
+    class_name = f"page-icon-img page-icon-img-{normalized}"
+    return _svg_icon_img(
+        icon_path,
+        class_name,
+        color,
+        trim_container=False,
+        preserve_fill_none_classes=False,
+    )
+
+
+def _service_icon_color(domain_class: str) -> str:
+    return {
+        "green": "#73b85a",
+        "purple": "#7d66b7",
+        "orange": "#ef7900",
+    }.get(domain_class, "#0f2d55")
+
+
 def _service_symbol(value: str) -> str:
     lowered = value.lower()
     if any(term in lowered for term in ("writing", "written", "expression")):
@@ -4071,33 +4865,97 @@ def _service_symbol(value: str) -> str:
     return "R"
 
 
-def _team_contacts_html(student: StudentResponse | None) -> str:
-    if student is None:
-        return """
-          <div class="soft-card" style="margin-top: 18px;">
-            <h3>Team Contacts</h3>
-            <p><strong>Case Manager:</strong> Not entered</p>
-          </div>
-        """
-    case_manager_name = student.case_manager or "Not entered"
-    rows = [
-        f"<p><strong>Case Manager:</strong> {escape(case_manager_name)}</p>",
-        f"<p><strong>School:</strong> {escape(student.school or 'Not entered')}</p>",
+def _team_contacts_html(
+    student: StudentResponse | None,
+    providers: list[RelatedServiceProviderDraft] | None = None,
+) -> str:
+    visible_providers = [
+        provider
+        for provider in sorted(providers or [], key=lambda item: item.position)
+        if provider.name.strip() or provider.email.strip() or provider.phone.strip()
     ]
-    if student.case_manager_phone:
-        rows.append(f"<p><strong>Phone:</strong> {escape(student.case_manager_phone)}</p>")
-    if student.case_manager_email:
-        rows.append(f"<p><strong>Email:</strong> {escape(student.case_manager_email)}</p>")
-    if student.case_manager_notes:
-        rows.append(
+    case_manager_name = student.case_manager if student and student.case_manager else "Not entered"
+    case_manager_rows = [
+        f"<p><strong>Case Manager:</strong> {escape(case_manager_name)}</p>",
+        f"<p><strong>School:</strong> {escape(student.school if student and student.school else 'Not entered')}</p>",
+    ]
+    if student and student.case_manager_phone:
+        case_manager_rows.append(f"<p><strong>Phone:</strong> {escape(student.case_manager_phone)}</p>")
+    if student and student.case_manager_email:
+        case_manager_rows.append(f"<p><strong>Email:</strong> {escape(student.case_manager_email)}</p>")
+    if student and student.case_manager_notes:
+        case_manager_rows.append(
             f"<p><strong>Notes:</strong> {escape(student.case_manager_notes).replace(chr(10), '<br>')}</p>"
         )
+    provider_cards = "".join(
+        f"""
+        <div style="break-inside: avoid; border: 1px solid #c8d7e6; border-radius: 10px; margin-top: 8px; padding: 10px 12px;">
+          <p style="margin: 0 0 4px;"><strong>{escape(provider.service_area or 'Related Service')}</strong></p>
+          <p style="margin: 0;">{escape(provider.name or 'Not entered')}</p>
+          {f'<p style="margin: 4px 0 0;"><strong>Email:</strong> {escape(provider.email)}</p>' if provider.email else ''}
+          {f'<p style="margin: 4px 0 0;"><strong>Phone:</strong> {escape(provider.phone)}</p>' if provider.phone else ''}
+        </div>
+        """
+        for provider in visible_providers
+    )
+    providers_section = (
+        f"""
+        <div style="border-top: 2px solid #e1ebf4; margin-top: 14px; padding-top: 12px;">
+          <h4 style="font-size: 11px; letter-spacing: 0.12em; margin: 0 0 8px; text-transform: uppercase;">Related Service Providers</h4>
+          {provider_cards}
+        </div>
+        """
+        if provider_cards
+        else ""
+    )
     return (
         '<div class="soft-card" style="margin-top: 18px;">'
         "<h3>Team Contacts</h3>"
-        + "".join(rows)
+        '<div style="break-inside: avoid;">'
+        "<h4 style=\"font-size: 11px; letter-spacing: 0.12em; margin: 0 0 8px; text-transform: uppercase;\">Case Manager</h4>"
+        + "".join(case_manager_rows)
+        + "</div>"
+        + providers_section
         + "</div>"
     )
+
+
+def _accommodation_area_label(item: AccommodationDraft) -> str:
+    if item.content_area == "Other":
+        return item.custom_content_area.strip() or "Other"
+    return item.content_area.strip() or "Instructional"
+
+
+def _accommodations_html(items: list[AccommodationDraft]) -> str:
+    visible = [item for item in sorted(items, key=lambda value: value.position) if item.text.strip()]
+    if not visible:
+        return '<div class="placeholder">No accommodations or modifications entered.</div>'
+    return "".join(
+        f"""
+        <article class="section">
+          <h3>{escape(_accommodation_area_label(item))}</h3>
+          <p>{escape(item.text).replace(chr(10), "<br>")}</p>
+        </article>
+        """
+        for item in visible
+    )
+
+
+def _behavior_plan_html(items: list[BehaviorPlanSectionDraft], legacy_text: str) -> str:
+    visible = [item for item in sorted(items, key=lambda value: value.position) if item.text.strip()]
+    if visible:
+        return "".join(
+            f"""
+            <article class="section">
+              <h3>{escape(item.title.strip() or "Behavior Plan")}</h3>
+              <p>{escape(item.text).replace(chr(10), "<br>")}</p>
+            </article>
+            """
+            for item in visible
+        )
+    if legacy_text.strip():
+        return f'<article class="section"><p>{escape(legacy_text).replace(chr(10), "<br>")}</p></article>'
+    return '<div class="soft-card" style="text-align: center; padding: 76px 28px;"><h2 style="color: #73b85a;">No Behavior Intervention Plan</h2><p>No behavior plan content entered.</p></div>'
 
 
 def _build_packet_html(
@@ -4117,13 +4975,15 @@ def _build_packet_html(
     cover_chips = "".join(
         f"""
         <div class="service-chip">
-          <span class="chip-dot">{escape(_service_symbol(name))}</span>
+          <span class="chip-dot">
+            {_service_icon_img(name, class_name="service-icon-img cover-service-icon", color="#ffffff", trim_container=False)}
+          </span>
           <span>{escape(name)}</span>
         </div>
         """
-        for name in service_names[:4]
+        for name in service_names[:8]
     )
-    service_count = min(len(service_names), 4)
+    service_count = min(len(service_names), 8)
     district_mark = (
         detail.brand_kit.district_name
         or detail.brand_kit.school_name
@@ -4137,7 +4997,8 @@ def _build_packet_html(
     body_classes = [f"template-{packet_template_id.replace('_', '-')}"]
     if watermark_src:
         body_classes.append("has-watermark")
-    identity_html = '<div class="cover-icon">SP</div>'
+    fallback_cover_icon = _cover_icon_markup()
+    identity_html = f'<div class="cover-icon">{fallback_cover_icon or "SP"}</div>'
     if detail.brand_kit.logo_relative_path:
         logo_src = detail.brand_kit.logo_relative_path.replace("\\", "/")
         identity_html = f'<img class="brand-logo cover-logo" src="{escape(logo_src)}" alt="">'
@@ -4186,10 +5047,10 @@ def _build_packet_html(
         if section.enabled and section.content.strip()
     ]
     rendered_pages["at_a_glance"] = (
-        """
+        f"""
         <section class="page">
           <div class="page-header">
-            <span class="badge">A</span>
+            <span class="badge page-icon-badge">{_page_icon_img("at-a-glance")}</span>
             <h2>At-a-Glance</h2>
           </div>
         """
@@ -4205,31 +5066,30 @@ def _build_packet_html(
         + "</section>"
     )
 
-    rendered_pages["accommodations"] = (
-        """
-        <section class="page">
-          <div class="page-header green">
-            <span class="badge green">A</span>
-            <h2>Accommodations/Modifications</h2>
-          </div>
-          <div class="placeholder">Reserved for the future accommodations/modifications editor.</div>
-        </section>
-        """
-    )
-    rendered_pages["behavior"] = (
-        """
-        <section class="page">
-          <div class="page-header green">
-            <span class="badge green">B</span>
-            <h2>Behavior Support</h2>
-          </div>
-          <div class="soft-card" style="text-align: center; padding: 76px 28px;">
-            <h2 style="color: #73b85a;">No Behavior Intervention Plan</h2>
-            <p>Behavior support content will be added alongside the future accommodations/modifications workflow.</p>
-          </div>
-        </section>
-        """
-    )
+    if any(item.text.strip() for item in detail.accommodations):
+        rendered_pages["accommodations"] = (
+            f"""
+            <section class="page">
+              <div class="page-header green">
+                <span class="badge green page-icon-badge">{_page_icon_img("accommodations")}</span>
+                <h2>Accommodations/Modifications</h2>
+              </div>
+              {_accommodations_html(detail.accommodations)}
+            </section>
+            """
+        )
+    if detail.behavior_plan.strip() or any(item.text.strip() for item in detail.behavior_plan_sections):
+        rendered_pages["behavior"] = (
+            f"""
+            <section class="page">
+              <div class="page-header green">
+                <span class="badge green page-icon-badge">{_page_icon_img("behavior-plan")}</span>
+                <h2>Behavior Support</h2>
+              </div>
+              {_behavior_plan_html(detail.behavior_plan_sections, detail.behavior_plan)}
+            </section>
+            """
+        )
 
     goal_sections: list[str] = []
     for area in detail.service_areas:
@@ -4240,8 +5100,10 @@ def _build_packet_html(
         goal_sections.append(
             f"""
             <div class="domain-title">
-              <span class="mini-dot {domain_class}"></span>
-              <h3>{escape(area.name)}</h3>
+            <span class="mini-dot {domain_class}" style="{_service_area_icon_style(area.name, customization, theme_id=theme_id)}">
+                {_service_icon_img(area.name, color="#ffffff")}
+            </span>
+            <h3>{escape(area.name)}</h3>
             </div>
             """
         )
@@ -4255,37 +5117,43 @@ def _build_packet_html(
             for goal in area_goals
         )
     rendered_pages["goal_summary"] = (
-        """
+        f"""
         <section class="page">
           <div class="page-header">
-            <span class="badge">G</span>
+            <span class="badge page-icon-badge">{_page_icon_img("goal-summary")}</span>
             <h2>Goal Summary</h2>
           </div>
         """
         + "".join(goal_sections)
         + "</section>"
     )
-
     rendered_pages["services"] = (
-        """
+        f"""
         <section class="page">
-          <div class="page-header">
-            <span class="badge">S</span>
+        <div class="page-header">
+            <span class="badge page-icon-badge">{_page_icon_img("service-info")}</span>
             <h2>Service Information</h2>
-          </div>
-          <h3>Service Areas</h3>
+        </div>
+
+        <h3>Service Areas</h3>
+
+        <div class="service-area-grid">
         """
         + "".join(
             f"""
-            <div class="domain-title">
-              <span class="mini-dot {_domain_class(area.name)}"></span>
-              <strong>{escape(area.name)}</strong>
+            <div class="service-area-card">
+            <span class="mini-dot {_domain_class(area.name)}" style="{_service_area_icon_style(area.name, customization, theme_id=theme_id)}">
+                {_service_icon_img(area.name, color="#ffffff")}
+            </span>
+            <span class="service-area-name">{escape(area.name)}</span>
             </div>
             """
             for area in detail.service_areas
         )
         + """
-          <h3 style="margin-top: 18px;">Weekly Service Minutes</h3>
+        </div>
+
+        <h3 style="margin-top: 18px;">Weekly Service Minutes</h3>
         """
         + _table(
             ["Service", "Minutes per week", "Delivery", "Setting"],
@@ -4299,10 +5167,9 @@ def _build_packet_html(
                 for area in detail.service_areas
             ],
         )
-        + _team_contacts_html(student)
+        + _team_contacts_html(student, detail.related_service_providers)
         + "</section>"
     )
-
     for sheet, goal, instance in _data_collection_items(detail):
         service_name = _service_area_name(detail, goal.service_area_id)
         domain_class = _domain_class(service_name)
@@ -4310,7 +5177,7 @@ def _build_packet_html(
             f"""
             <section class="page">
               <div class="page-header {domain_class}">
-                <span class="badge {domain_class}">D</span>
+                <span class="badge {domain_class} service-icon-badge" style="{_service_area_icon_style(service_name, customization, theme_id=theme_id)} {_service_icon_background(service_name, color="#ffffff")}">&nbsp;</span>
                 <h2>Data Collection</h2>
               </div>
               <h3>{escape(service_name)}</h3>
@@ -4329,7 +5196,7 @@ def _build_packet_html(
     checklist_items = detail.observation_checklist or DEFAULT_OBSERVATION_CHECKLIST
     checklist_html = f"""
       <div class="staff-checklist" style="margin-top: 12px;">
-        <h3 style="color: #ef7900;">Things Staff Need To Tell {escape(student.case_manager if student and student.case_manager else "The Case Manager")}</h3>
+        <h3 style="color: #ef7900;">Things Staff Need To Tell {escape(student.case_manager_first_name if student and student.case_manager_first_name else "The Case Manager")}</h3>
         {_checklist_table(checklist_items)}
       </div>
     """
@@ -4339,7 +5206,7 @@ def _build_packet_html(
             f"""
             <section class="page observation-page">
               <div class="page-header orange">
-                <span class="badge orange">O</span>
+                <span class="badge orange page-icon-badge">{_page_icon_img("observation")}</span>
                 <h2>{escape(sheet.title or "Observation Sheet")}</h2>
               </div>
               <p class="muted">{escape(sheet.collection_schedule or "General observation form")}</p>
@@ -4357,7 +5224,7 @@ def _build_packet_html(
             f"""
             <section class="page observation-page">
               <div class="page-header orange">
-                <span class="badge orange">N</span>
+                <span class="badge orange page-icon-badge">{_page_icon_img("observation")}</span>
                 <h2>Observations & Notes</h2>
               </div>
               <div class="observations-table">
@@ -4370,7 +5237,7 @@ def _build_packet_html(
 
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
-        f"<title>{escape(detail.name)}</title><style>{_packet_styles(theme_id, customization or detail.theme_customization, watermark_src, detail.brand_kit.default_fonts)}</style>"
+        f"<title>{escape(detail.name)}</title><style>{_packet_styles(theme_id, customization or detail.theme_customization, watermark_src, _brand_body_font(detail.brand_kit), _brand_heading_font(detail.brand_kit))}</style>"
         f"</head><body class=\"{escape(' '.join(body_classes))}\">"
         + "".join(_ordered_packet_pages(rendered_pages, packet_config))
         + "</body></html>"
@@ -4458,6 +5325,256 @@ def _render_packet_pdf_bytes(
         packet_version_name=packet.name,
         packet_config=_packet_config(packet),
         customization=_customization_for_template(packet_template_id),
+    )
+    try:
+        return render_pdf(PdfRenderRequest(html=html, base_url=str(settings.data_dir)))
+    except RuntimeError as reason:
+        raise HTTPException(status_code=503, detail=str(reason)) from reason
+
+
+def _sample_template_project_detail(draft: TemplatePreviewRequest) -> ProjectDetail:
+    sample_student = StudentResponse(
+        id="sample_student",
+        name="Jordan Rivera",
+        initials="JR",
+        grade="5",
+        school="Scranton Elementary",
+        case_manager="Jim Halpert",
+        case_manager_first_name="Jim",
+        case_manager_last_name="Halpert",
+        case_manager_phone="(555) 010-2045",
+        case_manager_email="jhalpert@example.org",
+        case_manager_notes="Best reached before school or during planning.",
+        iep_end_date=date(2027, 2, 18),
+    )
+    service_areas = [
+        ServiceAreaResponse(
+            id="reading",
+            name="Reading",
+            setting="Special Education",
+            minutes_per_week=180,
+            delivery_model="pull_out",
+            notes="Small-group fluency and comprehension instruction.",
+            position=0,
+        ),
+        ServiceAreaResponse(
+            id="math",
+            name="Math",
+            setting="Regular Education",
+            minutes_per_week=90,
+            delivery_model="push_in",
+            notes="In-class computation support.",
+            position=1,
+        ),
+        ServiceAreaResponse(
+            id="written_expression",
+            name="Written Expression",
+            setting="Special Education",
+            minutes_per_week=60,
+            delivery_model="combined",
+            notes="Planning, drafting, and revising support.",
+            position=2,
+        ),
+    ]
+    goals = [
+        GoalResponse(
+            id="reading_goal",
+            title="Reading Fluency",
+            statement="Given instructional-level passages, Jordan will read 95 words per minute with 95% accuracy across three consecutive trials by the IEP end date.",
+            data_sheet_summary="3 consecutive passages at 95 WPM w/ 95% accuracy.",
+            service_area_id="reading",
+            mastery_criteria="95 WPM with 95% accuracy for 3 consecutive trials",
+            progress_monitoring_method="Curriculum-based oral reading fluency probes",
+            instructional_notes="Preview vocabulary and provide repeated reading practice.",
+            position=0,
+        ),
+        GoalResponse(
+            id="math_goal",
+            title="Math Computation",
+            statement="Given mixed computation problems, Jordan will solve addition, subtraction, multiplication, and division problems with 85% accuracy across four trials.",
+            data_sheet_summary="4 computation probes at 85% accuracy.",
+            service_area_id="math",
+            mastery_criteria="85% accuracy across four trials",
+            progress_monitoring_method="Weekly computation probes",
+            instructional_notes="Allow scratch paper and model one example before independent work.",
+            position=1,
+        ),
+        GoalResponse(
+            id="writing_goal",
+            title="Written Response",
+            statement="Given a grade-level prompt and planning organizer, Jordan will write a complete paragraph with topic sentence, three details, and closing sentence in 4 of 5 opportunities.",
+            data_sheet_summary="4/5 paragraphs with topic, 3 details, and closing.",
+            service_area_id="written_expression",
+            mastery_criteria="4 of 5 writing opportunities",
+            progress_monitoring_method="Monthly writing samples",
+            instructional_notes="Use graphic organizers and sentence frames as needed.",
+            position=2,
+        ),
+    ]
+    at_a_glance = AtAGlanceResponse(
+        id="sample_glance",
+        sections=[
+            AtAGlanceSectionDraft(id="strengths", title="Student Strengths", content="Creative thinker\nStrong oral participation\nEnjoys science and hands-on tasks", enabled=True, position=0),
+            AtAGlanceSectionDraft(id="needs", title="Areas of Need", content="Reading fluency\nMath fact automaticity\nWritten organization", enabled=True, position=1),
+            AtAGlanceSectionDraft(id="strategies", title="Effective Strategies", content="Offer brief directions\nCheck for understanding\nUse visual organizers", enabled=True, position=2),
+            AtAGlanceSectionDraft(id="reminders", title="Staff Reminders", content="Praise effort and persistence. Provide private redirection when needed.", enabled=True, position=3),
+        ],
+    )
+    data_sheets = [
+        DataSheetResponse(
+            id="reading_sheet",
+            title="Reading Fluency Probe",
+            sheet_type="trial_count",
+            goal_ids=["reading_goal"],
+            collection_schedule="Every other week",
+            blank_instance_count=2,
+            columns=[
+                DataSheetColumnDraft(id="date", title="Date", column_type="date", position=0),
+                DataSheetColumnDraft(id="passage", title="Passage", column_type="text", position=1),
+                DataSheetColumnDraft(id="wpm", title="WPM", column_type="number", position=2),
+                DataSheetColumnDraft(id="accuracy", title="Accuracy", column_type="number", position=3),
+                DataSheetColumnDraft(id="notes", title="Notes", column_type="notes", position=4),
+            ],
+            notes="Track passage level and prompting.",
+            template_name="Fluency Probe",
+            is_template=True,
+            is_observation_form=False,
+            position=0,
+        ),
+        DataSheetResponse(
+            id="math_sheet",
+            title="Computation Chart",
+            sheet_type="trial_count",
+            goal_ids=["math_goal"],
+            collection_schedule="Weekly",
+            blank_instance_count=1,
+            columns=[
+                DataSheetColumnDraft(id="date", title="Date", column_type="date", position=0),
+                DataSheetColumnDraft(id="score", title="Score", column_type="number", position=1),
+                DataSheetColumnDraft(id="support", title="Support", column_type="text", position=2),
+                DataSheetColumnDraft(id="notes", title="Notes", column_type="notes", position=3),
+            ],
+            notes="Record strategy used.",
+            template_name="Computation Probe",
+            is_template=True,
+            is_observation_form=False,
+            position=1,
+        ),
+        DataSheetResponse(
+            id="observation_sheet",
+            title="Classroom Observation Sheet",
+            sheet_type="notes",
+            goal_ids=[],
+            collection_schedule="As needed",
+            blank_instance_count=1,
+            columns=[
+                DataSheetColumnDraft(id="date", title="Date", column_type="date", position=0),
+                DataSheetColumnDraft(id="context", title="Setting / Context", column_type="text", position=1),
+                DataSheetColumnDraft(id="observation", title="Observation", column_type="notes", position=2),
+                DataSheetColumnDraft(id="follow_up", title="Follow-up / Action", column_type="notes", position=3),
+            ],
+            notes="Use for staff notes that are not tied to one goal.",
+            template_name="Observation Form",
+            is_template=True,
+            is_observation_form=True,
+            position=2,
+        ),
+    ]
+    packet_pages = _default_packet_pages_from(DEFAULT_PACKET_PAGES)
+    packet_config = PacketVersionConfig(
+        packet_version_id="sample_packet",
+        pages=packet_pages,
+        asset_placements=[],
+    )
+    now = datetime.now(timezone.utc)
+    return ProjectDetail(
+        id="sample_template_project",
+        name="Sample Student - 2026-2027",
+        school_year="2026-2027",
+        default_export_filename="Jordan Rivera - Sample Packet.pdf",
+        student=sample_student,
+        service_areas=service_areas,
+        audiences=["case_manager", "general_education", "paraeducator"],
+        accommodations=[
+            AccommodationDraft(
+                id="sample_accommodation_instructional",
+                content_area="Instructional",
+                text="Provide visual directions and chunked assignments.\nCheck for understanding before transitions.",
+                position=0,
+            ),
+            AccommodationDraft(
+                id="sample_accommodation_assessment",
+                content_area="Classroom Assessment",
+                text="Allow extended time for written responses and independent reading tasks.",
+                position=1,
+            ),
+        ],
+        behavior_plan=(
+            "Use pre-correction before independent work.\n"
+            "Offer a brief break after sustained effort.\n"
+            "Notify the case manager if avoidance increases across settings."
+        ),
+        behavior_plan_sections=[
+            BehaviorPlanSectionDraft(
+                id="sample_behavior_problem",
+                title="Defined Problem Behavior",
+                text="Avoidance during lengthy independent reading or writing tasks.",
+                position=0,
+            ),
+            BehaviorPlanSectionDraft(
+                id="sample_behavior_prevention",
+                title="Prevention Strategies",
+                text="Preview directions, chunk assignments, and offer a brief check-in before independent work.",
+                position=1,
+            ),
+            BehaviorPlanSectionDraft(
+                id="sample_behavior_response",
+                title="Response Strategies",
+                text="Use calm redirection, offer a reset break, and notify the case manager if concerns continue.",
+                position=2,
+            ),
+        ],
+        packet_versions=[
+            PacketVersionResponse(id="sample_packet", name="Staff Packet", audience="base_packet")
+        ],
+        packet_builder=[packet_config],
+        observation_checklist=DEFAULT_OBSERVATION_CHECKLIST,
+        theme_id=_resolve_theme_id(draft.theme_id),
+        packet_template_id=draft.base_template_id,
+        theme_customization=draft.customization,
+        brand_kit=BrandKit(
+            id="sample_brand",
+            name="Sample District",
+            district_name="Gardiner Public Schools",
+            school_name="Gardiner Elementary",
+            heading_font="Poppins",
+            body_font="Open Sans",
+        ),
+        export_settings=ExportSettings(),
+        goals=goals,
+        at_a_glance=at_a_glance,
+        data_sheets=data_sheets,
+        student_setup_validation=StepValidation(is_complete=True, issues=[]),
+        goals_validation=validate_goals(goals),
+        at_a_glance_validation=validate_at_a_glance(at_a_glance),
+        data_sheets_validation=validate_data_sheets(data_sheets),
+        updated_at=now,
+    )
+
+
+def preview_template_library_item(draft: TemplatePreviewRequest) -> bytes:
+    valid_base_ids = {template.id for template in PACKET_TEMPLATE_OPTIONS}
+    if draft.base_template_id not in valid_base_ids:
+        raise HTTPException(status_code=422, detail="Unknown base packet template.")
+    theme_id = _resolve_theme_id(draft.theme_id)
+    detail = _sample_template_project_detail(draft)
+    html = _build_packet_html(
+        detail,
+        theme_id=theme_id,
+        packet_template_id=draft.base_template_id,
+        packet_version_name="Staff Packet",
+        packet_config=detail.packet_builder[0],
+        customization=draft.customization,
     )
     try:
         return render_pdf(PdfRenderRequest(html=html, base_url=str(settings.data_dir)))
