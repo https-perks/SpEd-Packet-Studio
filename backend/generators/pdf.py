@@ -1,4 +1,9 @@
 from dataclasses import dataclass
+import logging
+from backend.native_runtime import configure_bundled_native_libraries
+
+logging.getLogger("fontTools").setLevel(logging.WARNING)
+logging.getLogger("weasyprint").setLevel(logging.ERROR)
 
 
 @dataclass(frozen=True, slots=True)
@@ -8,6 +13,7 @@ class PdfRenderRequest:
 
 
 def render_pdf(request: PdfRenderRequest) -> bytes:
+    configure_bundled_native_libraries()
     try:
         from weasyprint import HTML
     except OSError as reason:

@@ -5,6 +5,7 @@ import { FieldFrame, selectClass } from "../components/ui/FormField";
 import { WorkflowHeader } from "../components/workflow/WorkflowHeader";
 import { useAutosave } from "../hooks/useAutosave";
 import { savePacketBuilder } from "../services/api/projects";
+import { useTerminology } from "../terminology/TerminologyProvider";
 import type { DataSheetDraft, GoalDraft, PacketVersionConfig, ProjectDetail, ServiceAreaDraft } from "../types/projects";
 
 type GoalWithId = GoalDraft & { readonly id: string };
@@ -23,14 +24,6 @@ function serviceAreaName(
   serviceAreas: readonly ServiceAreaWithId[],
 ) {
   return serviceAreas.find((area) => area.id === serviceAreaId)?.name || "Unassigned";
-}
-
-function deliveryLabel(value: string | null) {
-  if (!value) return "Not selected";
-  return value
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
 }
 
 function accommodationLabel(item: ProjectDetail["accommodations"][number]) {
@@ -52,6 +45,7 @@ function hasBehaviorContent(project: ProjectDetail) {
 
 function isPageAvailable(pageId: string, project: ProjectDetail) {
   if (pageId === "accommodations") return hasAccommodationContent(project);
+  if (pageId === "accommodations_signature") return hasAccommodationContent(project);
   if (pageId === "behavior") return hasBehaviorContent(project);
   return true;
 }
@@ -91,6 +85,7 @@ export function PacketDesignerPage({
   onBack,
   onComplete,
 }: PacketDesignerPageProps) {
+  const { fullTitle } = useTerminology();
   const [configs, setConfigs] = useState<PacketVersionConfig[]>(() =>
     project.packet_builder.map((config) => ({
       packet_version_id: config.packet_version_id,
@@ -203,14 +198,13 @@ export function PacketDesignerPage({
   const unassignedGoals = project.goals.filter((goal) => !goal.service_area_id);
   const dataCollectionPages = project.data_sheets.flatMap((sheet) =>
     sheet.is_observation_form ? [] :
-    goalsForSheet(sheet, project.goals).flatMap((goal) =>
-      Array.from({ length: sheet.blank_instance_count }).map((_, index) => ({
-        sheet,
-        goal,
-        instance: index + 1,
-      })),
-    ),
+    goalsForSheet(sheet, project.goals).map((goal) => ({
+      sheet,
+      goal,
+    })),
   );
+  const observationForms = project.data_sheets.filter((sheet) => sheet.is_observation_form);
+  const customPages = selectedConfig?.pages.filter((page) => page.page_type === "custom_text" && page.enabled) ?? [];
   const visiblePageEntries = selectedConfig?.pages
     .map((page, index) => ({ page, index }))
     .filter(({ page }) => isPageAvailable(page.id, project)) ?? [];
@@ -219,6 +213,13 @@ export function PacketDesignerPage({
       .filter((page) => page.enabled && isPageAvailable(page.id, project))
       .map((page) => page.id) ?? [],
   );
+  const orderedEnabledPageIds = selectedConfig?.pages
+    .filter((page) => page.enabled && isPageAvailable(page.id, project))
+    .map((page) => page.id) ?? [];
+  function previewOrder(pageId: string) {
+    const index = orderedEnabledPageIds.indexOf(pageId);
+    return index === -1 ? 999 : index;
+  }
   return (
     <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
       <WorkflowHeader
@@ -276,10 +277,12 @@ export function PacketDesignerPage({
                   />
                   <span className="min-w-0">
                     <span className="block font-semibold text-[var(--theme-text)]">
-                      {visibleIndex + 1}. {page.title}
+                      {visibleIndex + 1}. {page.title || "Custom Page"}
                     </span>
                     <span className="text-xs text-[var(--theme-text-muted)]">
-                      Hold Drag and move over another row, or use Up/Down
+                      {page.page_type === "custom_text"
+                        ? "Edit custom pages from Staff Notes and Custom Pages."
+                        : "Hold Drag and move over another row, or use Up/Down"}
                     </span>
                   </span>
                 </div>
@@ -292,11 +295,11 @@ export function PacketDesignerPage({
           </div>
         </Card>
 
-        <div className="space-y-5">
-          {availableEnabledPageIds.has("cover") && <PacketPage title="Cover Page" description="Uses Student Setup data.">
+        <div className="flex flex-col gap-5">
+          {availableEnabledPageIds.has("cover") && <div style={{ order: previewOrder("cover") }}><PacketPage title="Cover Page" description="Uses Student Setup data.">
             <div className="border-b border-[var(--theme-border)] pb-6">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--theme-accent)]">
-                Special Education Service Packet
+                {fullTitle} Service Packet
               </p>
               <h2 className="mt-3 text-4xl font-semibold tracking-tight text-[var(--theme-primary)]">
                 {project.name}
@@ -323,9 +326,9 @@ export function PacketDesignerPage({
                 </dd>
               </div>
             </dl>
-          </PacketPage>}
+          </PacketPage></div>}
 
-          {availableEnabledPageIds.has("at_a_glance") && <PacketPage title="At-a-Glance" description="Instructional summary preview.">
+          {availableEnabledPageIds.has("at_a_glance") && <div style={{ order: previewOrder("at_a_glance") }}><PacketPage title="At-a-Glance" description="Instructional summary preview.">
             <div className="overflow-hidden rounded-xl border border-[var(--theme-border)]">
               <div className="bg-[var(--theme-primary)] px-5 py-5 text-white">
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/65">
@@ -349,9 +352,9 @@ export function PacketDesignerPage({
                   ))}
               </div>
             </div>
-          </PacketPage>}
+          </PacketPage></div>}
 
-          {availableEnabledPageIds.has("accommodations") && <PacketPage title="Accommodations/Modifications" description="Student Setup accommodations and modifications.">
+          {availableEnabledPageIds.has("accommodations") && <div style={{ order: previewOrder("accommodations") }}><PacketPage title="Accommodations/Modifications" description="Student Setup accommodations and modifications.">
             {project.accommodations.filter((item) => item.text.trim()).length ? (
               <div className="space-y-4">
                 {project.accommodations
@@ -366,9 +369,41 @@ export function PacketDesignerPage({
             ) : (
               <p className="text-sm leading-6 text-[var(--theme-text-muted)]">No accommodations or modifications entered yet.</p>
             )}
-          </PacketPage>}
+          </PacketPage></div>}
 
-          {availableEnabledPageIds.has("behavior") && <PacketPage title="Behavior Plans" description="Student Setup behavior support content.">
+          {availableEnabledPageIds.has("accommodations_signature") && <div style={{ order: previewOrder("accommodations_signature") }}><PacketPage title="Accommodations Signature Page" description="Staff receipt signature sheet.">
+            <div className="rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-surface)] p-5">
+              <div className="border-b-2 border-[var(--theme-border)] pb-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--theme-accent)]">
+                  Accommodations receipt
+                </p>
+                <h3 className="mt-2 text-2xl font-semibold text-[var(--theme-primary)]">
+                  Staff Signature Page
+                </h3>
+                <div className="mt-3 flex flex-wrap gap-4 text-sm text-[var(--theme-text)]">
+                  <span><strong>Student:</strong> {studentName}</span>
+                  <span><strong>IEP End:</strong> {project.student?.iep_end_date || "Not entered"}</span>
+                </div>
+              </div>
+              <p className="mt-4 text-sm leading-6 text-[var(--theme-text-muted)]">
+                The final PDF uses the title, note, and line style from Dashboard accommodations settings.
+              </p>
+              <div className="mt-5 overflow-hidden rounded-xl border border-[var(--theme-border)] bg-white">
+                <div className="grid grid-cols-[1fr_10rem] bg-[var(--theme-primary)] text-xs font-semibold uppercase tracking-[0.12em] text-white">
+                  <div className="border-r border-white/25 px-4 py-3">Staff Member</div>
+                  <div className="px-4 py-3">Date</div>
+                </div>
+                {Array.from({ length: 7 }).map((_, index) => (
+                  <div key={index} className="grid grid-cols-[1fr_10rem]">
+                    <div className="h-16 border-r border-t border-[var(--theme-border)]" />
+                    <div className="h-16 border-t border-[var(--theme-border)]" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </PacketPage></div>}
+
+          {availableEnabledPageIds.has("behavior") && <div style={{ order: previewOrder("behavior") }}><PacketPage title="Behavior Plans" description="Student Setup behavior support content.">
             {visibleBehaviorSections(project).length ? (
               <div className="space-y-4">
                 {visibleBehaviorSections(project).map((item, index) => (
@@ -385,9 +420,9 @@ export function PacketDesignerPage({
                 {project.behavior_plan.trim() || "No behavior plan entered yet."}
               </p>
             )}
-          </PacketPage>}
+          </PacketPage></div>}
 
-          {availableEnabledPageIds.has("goal_summary") && <PacketPage title="Goal Summary" description="Full goals grouped under each service area.">
+          {availableEnabledPageIds.has("goal_summary") && <div style={{ order: previewOrder("goal_summary") }}><PacketPage title="Goal Summary" description="Full goals grouped under each service area.">
             <div className="space-y-6">
               {[...goalsByServiceArea, ...(unassignedGoals.length ? [{ area: null, goals: unassignedGoals }] : [])]
                 .filter((group) => group.goals.length)
@@ -409,16 +444,15 @@ export function PacketDesignerPage({
                   </section>
                 ))}
             </div>
-          </PacketPage>}
+          </PacketPage></div>}
 
-          {availableEnabledPageIds.has("services") && <PacketPage title="Service Areas" description="Includes duplicate service names when delivery differs.">
+          {availableEnabledPageIds.has("services") && <div style={{ order: previewOrder("services") }}><PacketPage title="Service Areas" description="Lists service minutes and instructional setting.">
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-sm">
                 <thead>
                   <tr>
                     <th className="border border-[var(--theme-border)] bg-[var(--theme-surface-muted)] px-3 py-2 text-left font-semibold">Service</th>
                     <th className="border border-[var(--theme-border)] bg-[var(--theme-surface-muted)] px-3 py-2 text-left font-semibold">Minutes per week</th>
-                    <th className="border border-[var(--theme-border)] bg-[var(--theme-surface-muted)] px-3 py-2 text-left font-semibold">Delivery</th>
                     <th className="border border-[var(--theme-border)] bg-[var(--theme-surface-muted)] px-3 py-2 text-left font-semibold">Setting</th>
                   </tr>
                 </thead>
@@ -427,20 +461,19 @@ export function PacketDesignerPage({
                     <tr key={area.id}>
                       <td className="border border-[var(--theme-border)] px-3 py-2">{area.name}</td>
                       <td className="border border-[var(--theme-border)] px-3 py-2">{area.minutes_per_week ?? "Not entered"}</td>
-                      <td className="border border-[var(--theme-border)] px-3 py-2">{deliveryLabel(area.delivery_model)}</td>
                       <td className="border border-[var(--theme-border)] px-3 py-2">{area.setting || "Not entered"}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </PacketPage>}
+          </PacketPage></div>}
 
-          {availableEnabledPageIds.has("data_collection") && dataCollectionPages.map(({ sheet, goal, instance }) => (
+          {availableEnabledPageIds.has("data_collection") && <div style={{ order: previewOrder("data_collection") }} className="space-y-5">{dataCollectionPages.map(({ sheet, goal }) => (
             <PacketPage
-              key={`${sheet.id ?? sheet.title}-${goal.id}-${instance}`}
+              key={`${sheet.id ?? sheet.title}-${goal.id}`}
               title={`Data Collection - ${goal.title}`}
-              description={`${sheet.title}, blank table ${instance} of ${sheet.blank_instance_count}`}
+              description={`${sheet.title}. Final PDF includes ${sheet.blank_instance_count} blank ${sheet.blank_instance_count === 1 ? "table" : "tables"}.`}
             >
               <div>
                 <p className="text-sm leading-6 text-[var(--theme-text)]">
@@ -481,7 +514,92 @@ export function PacketDesignerPage({
                 </table>
               </div>
             </PacketPage>
+          ))}</div>}
+
+          {customPages.map((page) => (
+            <div key={page.id} style={{ order: previewOrder(page.id) }}>
+              <PacketPage title={page.title || "Custom Page"} description="Blank/custom packet page.">
+                <div>
+                  {page.body_text?.trim() ? (
+                    <p className="whitespace-pre-wrap text-sm leading-6 text-[var(--theme-text)]">
+                      {page.body_text}
+                    </p>
+                  ) : (
+                    <div className="space-y-4">
+                      <p className="text-sm text-[var(--theme-text-muted)]">
+                        Blank lined page. Edit title/text from Staff Notes and Custom Pages.
+                      </p>
+                      {Array.from({ length: 8 }).map((_, index) => (
+                        <div key={index} className="h-8 border-b border-[var(--theme-border)]" />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </PacketPage>
+            </div>
           ))}
+
+          {availableEnabledPageIds.has("observations") && <div style={{ order: previewOrder("observations") }}><PacketPage title="Observations & Notes" description="Standalone observation forms and staff-to-case-manager checklist.">
+            <div className="space-y-5">
+              {(observationForms.length ? observationForms : [{
+                id: "default-observations",
+                title: "Observations & Notes",
+                collection_schedule: "General observation form",
+                columns: [
+                  { id: "date", title: "Date", column_type: "date", position: 0 },
+                  { id: "setting", title: "Setting / Context", column_type: "text", position: 1 },
+                  { id: "observation", title: "Observation", column_type: "notes", position: 2 },
+                  { id: "follow_up", title: "Follow-up / Action", column_type: "notes", position: 3 },
+                ],
+                notes: "",
+              }]).map((sheet, sheetIndex) => (
+                <section key={sheet.id ?? `${sheet.title}-${sheetIndex}`} className="rounded-xl border border-[var(--theme-border)] p-4">
+                  <div>
+                    <h3 className="text-base font-semibold text-[var(--theme-primary)]">{sheet.title || "Observation Sheet"}</h3>
+                    <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--theme-accent)]">
+                      {sheet.collection_schedule || "General observation form"}
+                    </p>
+                    {sheet.notes && <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--theme-text-muted)]">{sheet.notes}</p>}
+                  </div>
+                  <div className="mt-4 overflow-x-auto">
+                    <table className="w-full border-collapse text-sm">
+                      <thead>
+                        <tr>
+                          {sheet.columns.map((column) => (
+                            <th key={column.id} className="border border-[var(--theme-border)] bg-[var(--theme-surface-muted)] px-3 py-2 text-left font-semibold">
+                              {column.title}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Array.from({ length: 8 }).map((_, rowIndex) => (
+                          <tr key={rowIndex}>
+                            {sheet.columns.map((column) => (
+                              <td key={column.id} className="h-10 border border-[var(--theme-border)] px-3 py-2" />
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              ))}
+              <section className="rounded-xl border border-orange-200 bg-orange-50 p-4">
+                <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-orange-700">
+                  Things Staff Need To Tell {project.student?.case_manager_first_name || "The Case Manager"}
+                </h3>
+                <div className="mt-3 grid gap-2 text-sm text-orange-950 sm:grid-cols-2">
+                  {(project.observation_checklist.length ? project.observation_checklist : ["Other observations"]).map((item, index) => (
+                    <label key={`${item}-${index}`} className="flex gap-2">
+                      <input type="checkbox" disabled />
+                      <span>{item}</span>
+                    </label>
+                  ))}
+                </div>
+              </section>
+            </div>
+          </PacketPage></div>}
         </div>
       </div>
 

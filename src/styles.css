@@ -15,3 +15,155 @@
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; }
 button, a { outline-offset: 3px; }
+
+.folio-splash {
+  align-items: center;
+  background:
+    radial-gradient(circle at 50% 36%, rgb(39 184 178 / 18%), transparent 18rem),
+    linear-gradient(145deg, var(--theme-primary) 0%, #10263b 54%, #081723 100%);
+  color: white;
+  display: grid;
+  gap: 1.5rem;
+  min-height: 100vh;
+  overflow: hidden;
+  padding: 2rem;
+  place-content: center;
+  position: relative;
+  text-align: center;
+}
+
+.folio-splash::before,
+.folio-splash::after {
+  background: rgb(255 255 255 / 6%);
+  content: "";
+  height: 28rem;
+  position: absolute;
+  transform: rotate(-18deg);
+  width: 9rem;
+}
+
+.folio-splash::before {
+  left: max(-4rem, 4vw);
+  top: -7rem;
+}
+
+.folio-splash::after {
+  bottom: -9rem;
+  right: max(-5rem, 8vw);
+}
+
+.folio-splash__orb {
+  display: grid;
+  height: 13rem;
+  isolation: isolate;
+  margin-inline: auto;
+  place-items: center;
+  position: relative;
+  width: 13rem;
+}
+
+.folio-splash__ring {
+  border: 2px solid rgb(255 255 255 / 24%);
+  border-radius: 999px;
+  inset: 0;
+  position: absolute;
+}
+
+.folio-splash__ring--outer {
+  animation: folio-orbit 4.6s linear infinite;
+  border-left-color: transparent;
+  border-right-color: rgb(239 121 0 / 80%);
+}
+
+.folio-splash__ring--inner {
+  animation: folio-orbit 3.5s linear infinite reverse;
+  border-bottom-color: transparent;
+  border-top-color: rgb(39 184 178 / 90%);
+  inset: 1.35rem;
+}
+
+.folio-splash__fox {
+  animation: folio-float 2.8s ease-in-out infinite;
+  filter: drop-shadow(0 1.25rem 1.75rem rgb(0 0 0 / 28%));
+  display: block;
+  max-height: 9.5rem;
+  max-width: 9.5rem;
+  object-fit: contain;
+  position: relative;
+  z-index: 1;
+}
+
+.folio-splash__orb picture {
+  position: relative;
+  z-index: 1;
+}
+
+.folio-splash__copy {
+  max-width: 32rem;
+  position: relative;
+  z-index: 1;
+}
+
+.folio-splash__eyebrow {
+  color: rgb(39 184 178);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  margin: 0 0 0.7rem;
+  text-transform: uppercase;
+}
+
+.folio-splash h1 {
+  font-size: clamp(2.2rem, 5vw, 4.2rem);
+  line-height: 0.95;
+  margin: 0;
+}
+
+.folio-splash__copy p:last-child {
+  color: rgb(255 255 255 / 72%);
+  font-size: 0.98rem;
+  line-height: 1.6;
+  margin: 1rem 0 0;
+}
+
+.folio-splash__progress {
+  background: rgb(255 255 255 / 14%);
+  border-radius: 999px;
+  height: 0.42rem;
+  margin-inline: auto;
+  overflow: hidden;
+  position: relative;
+  width: min(18rem, 70vw);
+  z-index: 1;
+}
+
+.folio-splash__progress span {
+  animation: folio-progress 1.55s ease-in-out infinite;
+  background: linear-gradient(90deg, #27b8b2, #ef7900);
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  width: 45%;
+}
+
+@keyframes folio-float {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-0.55rem) scale(1.02); }
+}
+
+@keyframes folio-orbit {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes folio-progress {
+  0% { transform: translateX(-110%); }
+  55%, 100% { transform: translateX(230%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .folio-splash__fox,
+  .folio-splash__ring,
+  .folio-splash__progress span {
+    animation: none;
+  }
+}

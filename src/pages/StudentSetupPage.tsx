@@ -6,26 +6,18 @@ import { ValidationSummary } from "../components/workflow/ValidationSummary";
 import { WorkflowHeader } from "../components/workflow/WorkflowHeader";
 import { useAutosave } from "../hooks/useAutosave";
 import { validateStudentSetup } from "../lib/validation";
+import { useTerminology } from "../terminology/TerminologyProvider";
 import { getAppSettings, saveAppSettings, saveStudentSetup } from "../services/api/projects";
 import type {
   AccommodationDraft,
   AppSettings,
   Audience,
   BehaviorPlanSectionDraft,
-  DeliveryModel,
   ProjectDetail,
   RelatedServiceProviderDraft,
   ServiceAreaDraft,
   StudentSetupDraft,
 } from "../types/projects";
-
-const audienceOptions: readonly { value: Audience; label: string }[] = [
-  { value: "case_manager", label: "Case Manager" },
-  { value: "general_education", label: "General Education" },
-  { value: "paraeducator", label: "Paraeducator" },
-  { value: "related_services", label: "Related Services" },
-  { value: "substitute", label: "Substitute" },
-];
 
 const settingOptions = ["Regular Education", "Special Education"] as const;
 const customSettingValue = "__custom_setting__";
@@ -71,7 +63,6 @@ function blankServiceArea(position: number): ServiceAreaDraft {
     name: "",
     setting: "",
     minutes_per_week: null,
-    delivery_model: null,
     notes: "",
     position,
   };
@@ -161,6 +152,8 @@ function initialDraft(project: ProjectDetail): StudentSetupDraft {
     service_areas: project.service_areas.map((area) => ({ ...area })),
     audiences: [...project.audiences],
     accommodations: (project.accommodations ?? []).map((item) => ({ ...item })),
+    accommodations_parent_strengths_enabled: project.accommodations_parent_strengths_enabled ?? false,
+    accommodations_parent_strengths: project.accommodations_parent_strengths ?? "",
     behavior_plan: project.behavior_plan ?? "",
     behavior_plan_sections: (project.behavior_plan_sections ?? []).map((item) => ({ ...item })),
     related_service_providers: (project.related_service_providers ?? []).map((item) => ({ ...item })),
@@ -180,6 +173,7 @@ export function StudentSetupPage({
   onBack,
   onContinue,
 }: StudentSetupPageProps) {
+  const { fullTitle } = useTerminology();
   const [draft, setDraft] = useState<StudentSetupDraft>(() => initialDraft(project));
   const [saveError, setSaveError] = useState("");
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
@@ -203,6 +197,24 @@ export function StudentSetupPage({
       .filter(Boolean) ?? [];
     return saved.length ? saved : fallbackServiceAreaPresets;
   }, [appSettings]);
+  const packetAudienceOptions = useMemo(() => {
+    const configured = appSettings?.packet_versions
+      .map((version) => ({
+        value: version.audience,
+        label: version.name,
+      }))
+      .filter((version) => version.value && version.label.trim()) ?? [];
+    const projectOnly = draft.audiences
+      .filter((audience) => !configured.some((option) => option.value === audience))
+      .map((audience) => {
+        const version = project.packet_versions.find((item) => item.audience === audience);
+        return {
+          value: audience,
+          label: version?.name || audience.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()),
+        };
+      });
+    return [...configured, ...projectOnly];
+  }, [appSettings, draft.audiences, project.packet_versions]);
 
   useEffect(() => {
     void getAppSettings()
@@ -293,7 +305,6 @@ export function StudentSetupPage({
         name,
         setting: "",
         minutes_per_week: null,
-        delivery_model: null,
         notes: "",
         position,
       })),
@@ -362,6 +373,8 @@ export function StudentSetupPage({
 
   const fieldError = (field: string) =>
     validation.issues.find((issue) => issue.field === field)?.message;
+  const hasAccommodations = draft.accommodations.some((item) => item.text.trim());
+  const hasBehaviorPlan = draft.behavior_plan_sections.some((item) => item.text.trim()) || draft.behavior_plan.trim().length > 0;
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
@@ -490,10 +503,10 @@ export function StudentSetupPage({
           actions={(
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" onClick={() => setContentModal("accommodations")}>
-                Add Accommodations
+                {hasAccommodations ? "Edit Accommodations" : "Add Accommodations"}
               </Button>
               <Button variant="outline" onClick={() => setContentModal("behavior_plan")}>
-                Add Behavior Plan
+                {hasBehaviorPlan ? "Edit Behavior Plan" : "Add Behavior Plan"}
               </Button>
             </div>
           )}
@@ -619,7 +632,7 @@ export function StudentSetupPage({
                       >
                         <option value="">Select setting</option>
                         <option value="Regular Education">Regular Education</option>
-                        <option value="Special Education">Special Education</option>
+                        <option value="Special Education">{fullTitle}</option>
                         <option value={customSettingValue}>Other</option>
                       </select>
                       {(settingSelectValue(area.setting) === customSettingValue || customSettingRows.has(serviceAreaKey(area, index))) && (
@@ -635,11 +648,6 @@ export function StudentSetupPage({
                     <FieldFrame label="Minutes per week" htmlFor={`area-${index}-minutes`}>
                       <TextInput id={`area-${index}-minutes`} type="number" min={0} value={area.minutes_per_week ?? ""} onChange={(event) => updateArea(index, { minutes_per_week: event.target.value ? Number(event.target.value) : null })} />
                     </FieldFrame>
-                    <FieldFrame label="Delivery" htmlFor={`area-${index}-delivery`}>
-                      <select className={selectClass} id={`area-${index}-delivery`} value={area.delivery_model ?? ""} onChange={(event) => updateArea(index, { delivery_model: (event.target.value || null) as DeliveryModel | null })}>
-                        <option value="">Select</option><option value="push_in">Push-in</option><option value="pull_out">Pull-out</option><option value="combined">Combined</option><option value="other">Other</option>
-                      </select>
-                    </FieldFrame>
                     <div className="md:col-span-2 xl:col-span-4">
                       <FieldFrame label="Notes" htmlFor={`area-${index}-notes`}>
                         <TextArea id={`area-${index}-notes`} value={area.notes} onChange={(event) => updateArea(index, { notes: event.target.value })} placeholder="Optional instructional or scheduling notes" />
@@ -652,15 +660,20 @@ export function StudentSetupPage({
           )}
         </Card>
 
-        <Card title="Packet audiences" description="These selections create initial Packet Version objects. Page visibility will be configured later.">
+        <Card title="Packet audiences" description="Choose which Dashboard-defined packet versions this project should include. Page visibility will be configured later.">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            {audienceOptions.map((option) => (
+            {packetAudienceOptions.map((option) => (
               <label key={option.value} className={`flex cursor-pointer items-center gap-3 rounded-xl border p-4 text-sm font-semibold transition ${draft.audiences.includes(option.value) ? "border-[var(--theme-primary)] bg-[var(--theme-primary-soft)] text-[var(--theme-primary)]" : "border-[var(--theme-border)] bg-white text-[var(--theme-text)]"}`}>
                 <input type="checkbox" checked={draft.audiences.includes(option.value)} onChange={() => toggleAudience(option.value)} />
                 {option.label}
               </label>
             ))}
           </div>
+          {packetAudienceOptions.length === 0 && (
+            <p className="text-sm text-[var(--theme-text-muted)]">
+              Add packet audiences from Dashboard settings before selecting versions for this project.
+            </p>
+          )}
         </Card>
 
         <ValidationSummary validation={validation} />
@@ -762,6 +775,41 @@ export function StudentSetupPage({
                 >
                   Add New
                 </Button>
+
+                <div className="rounded-xl border border-[var(--theme-border)] bg-white p-4">
+                  <label className="flex items-start gap-3 text-sm font-semibold text-[var(--theme-text)]">
+                    <input
+                      checked={draft.accommodations_parent_strengths_enabled}
+                      className="mt-1"
+                      type="checkbox"
+                      onChange={(event) => setDraft((current) => ({
+                        ...current,
+                        accommodations_parent_strengths_enabled: event.target.checked,
+                      }))}
+                    />
+                    <span>
+                      Add Parent Perception of Student&apos;s Strengths?
+                      <span className="mt-1 block text-xs font-medium text-[var(--theme-text-muted)]">
+                        This appears at the bottom of the accommodations page and is separate from At-a-Glance.
+                      </span>
+                    </span>
+                  </label>
+                  {draft.accommodations_parent_strengths_enabled && (
+                    <div className="mt-4">
+                      <FieldFrame label="Parent Perception of Student's Strengths" htmlFor="accommodations-parent-strengths">
+                        <TextArea
+                          id="accommodations-parent-strengths"
+                          value={draft.accommodations_parent_strengths}
+                          onChange={(event) => setDraft((current) => ({
+                            ...current,
+                            accommodations_parent_strengths: event.target.value,
+                          }))}
+                          placeholder="Paste or type parent input about the student's strengths..."
+                        />
+                      </FieldFrame>
+                    </div>
+                  )}
+                </div>
 
                 {draft.accommodations.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-[var(--theme-border)] p-6 text-center text-sm text-[var(--theme-text-muted)]">

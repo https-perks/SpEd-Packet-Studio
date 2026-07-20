@@ -6,10 +6,17 @@ import tempfile
 import unittest
 
 TEST_DATA_DIR = Path(tempfile.mkdtemp(prefix="packet-studio-sprint-one-"))
-os.environ["PACKET_STUDIO_DATA_DIR"] = str(TEST_DATA_DIR)
+os.environ["SPED_PACKET_APP_DATA_DIR"] = str(TEST_DATA_DIR)
+os.environ["PACKET_STUDIO_DATA_DIR"] = str(TEST_DATA_DIR / "data")
 os.environ["PACKET_STUDIO_ENV"] = "test"
 
+# Test discovery imports test_paths first; refresh the process-wide path object
+# after this module installs its isolated database override.
+import backend.paths as path_module
+path_module.paths = path_module.AppPaths.resolve()
+
 from backend.database.migrations.runner import run_migrations
+from backend.config import settings
 from backend.database.session import SessionLocal, engine
 from backend.generators.pdf import renderer_available
 from backend.schemas.projects import (
@@ -25,6 +32,8 @@ from backend.schemas.projects import (
     GoalsDraft,
     ObservationChecklistDraft,
     PacketBuilderDraft,
+    PacketPageDraft,
+    PacketVersionDraft,
     ServiceAreaDraft,
     StudentSetupDraft,
     ThemeSelection,
@@ -35,6 +44,9 @@ from backend.services import projects
 class ProjectWorkflowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        settings.settings_dir.mkdir(parents=True, exist_ok=True)
+        (settings.settings_dir / ".legacy-data-migration-v1.json").write_text("{}", encoding="utf-8")
+        settings.paths.initialize()
         run_migrations()
 
     @classmethod
@@ -46,6 +58,7 @@ class ProjectWorkflowTests(unittest.TestCase):
         with SessionLocal() as session:
             projects.save_app_settings(
                 AppSettings(
+                    terminology_preference="ese",
                     default_school_year="2027-2028",
                     default_theme_id="minimal",
                     default_packet_template_id="modern_professional",
@@ -55,6 +68,17 @@ class ProjectWorkflowTests(unittest.TestCase):
                         export_mode="single_pdf",
                     ),
                     default_observation_checklist=["Call family", "Tell case manager"],
+                    packet_versions=[
+                        PacketVersionDraft(name="Case Manager", audience="case_manager"),
+                        PacketVersionDraft(name="General Education", audience="general_education"),
+                        PacketVersionDraft(name="Coach Packet", audience="coach_packet"),
+                    ],
+                    accommodations_signature_page_enabled=True,
+                    accommodations_signature_page_title="Accommodation Receipt Signatures",
+                    accommodations_signature_page_note=(
+                        "Staff signing below have reviewed this student's accommodations."
+                    ),
+                    accommodations_signature_line_layout="teacher_coach_date",
                     default_data_sheet_columns=[
                         DataSheetColumnDraft(
                             id="date",
@@ -74,7 +98,6 @@ class ProjectWorkflowTests(unittest.TestCase):
                             name="Math",
                             setting="Special Education",
                             minutes_per_week=90,
-                            delivery_model="pull_out",
                             notes="",
                             position=0,
                         )
@@ -96,12 +119,13 @@ class ProjectWorkflowTests(unittest.TestCase):
             self.assertEqual(created.observation_checklist, ["Call family", "Tell case manager"])
             self.assertEqual(created.student.case_manager if created.student else None, "Default Manager")
             self.assertEqual(projects.get_app_settings().service_area_presets[0].name, "Math")
+            self.assertEqual(projects.get_app_settings().terminology_preference, "ese")
             setup = StudentSetupDraft.model_validate(
                 {
                     "project_name": "",
                     "school_year": "",
                     "student": {
-                        "name": "Jordan Rivera",
+                        "name": "Cecilia Halpert",
                         "initials": "",
                         "grade": "7",
                         "school": "Central Middle",
@@ -118,12 +142,11 @@ class ProjectWorkflowTests(unittest.TestCase):
                             "name": "Reading",
                             "setting": "Resource room",
                             "minutes_per_week": 150,
-                            "delivery_model": "pull_out",
                             "notes": "",
                             "position": 0,
                         }
                     ],
-                    "audiences": ["case_manager", "general_education"],
+                    "audiences": ["case_manager", "general_education", "coach_packet"],
                     "accommodations": [
                         {
                             "content_area": "Instructional",
@@ -138,6 +161,10 @@ class ProjectWorkflowTests(unittest.TestCase):
                             "position": 1,
                         },
                     ],
+                    "accommodations_parent_strengths_enabled": True,
+                    "accommodations_parent_strengths": (
+                        "Parent reports Jordan is kind, curious, and persistent."
+                    ),
                     "behavior_plan_sections": [
                         {
                             "title": "Defined Problem Behavior",
@@ -163,7 +190,7 @@ class ProjectWorkflowTests(unittest.TestCase):
             )
             detail = projects.save_student_setup(session, created.id, setup)
             self.assertTrue(detail.student_setup_validation.is_complete)
-            self.assertEqual(detail.student.initials if detail.student else None, "JR")
+            self.assertEqual(detail.student.initials if detail.student else None, "CH")
             self.assertEqual(detail.student.case_manager if detail.student else None, "Alex Teacher")
             self.assertEqual(detail.student.case_manager_email if detail.student else None, "alex.teacher@example.edu")
             self.assertEqual(len(detail.accommodations), 2)
@@ -172,7 +199,8 @@ class ProjectWorkflowTests(unittest.TestCase):
             self.assertEqual(len(detail.related_service_providers), 1)
             self.assertIn("pre-correction", detail.behavior_plan)
             self.assertEqual(detail.school_year, "2026-2027")
-            self.assertEqual(len(detail.audiences), 2)
+            self.assertEqual(len(detail.audiences), 3)
+            self.assertIn("coach_packet", detail.audiences)
 
             goals = GoalsDraft.model_validate(
                 {
@@ -257,7 +285,8 @@ class ProjectWorkflowTests(unittest.TestCase):
             self.assertTrue(detail.data_sheets_validation.is_complete)
             self.assertEqual(detail.data_sheets[0].goal_ids, [detail.goals[0].id])
             self.assertEqual(detail.data_sheets[0].blank_instance_count, 4)
-            self.assertEqual(len(detail.packet_versions), 2)
+            self.assertEqual(len(detail.packet_versions), 3)
+            self.assertIn("Coach Packet", [version.name for version in detail.packet_versions])
             self.assertEqual(
                 [column.title for column in detail.data_sheets[0].columns],
                 ["Date", "WPM", "Accuracy"],
@@ -313,7 +342,7 @@ class ProjectWorkflowTests(unittest.TestCase):
                 ThemeSelection.model_validate(
                     {
                         "theme_id": "teacher_friendly",
-                        "packet_template_id": "mountain_illustrated",
+                        "packet_template_id": "district_branding",
                         "customization": {
                             "primary_color": "#24577a",
                             "secondary_color": "#35b7a9",
@@ -332,7 +361,7 @@ class ProjectWorkflowTests(unittest.TestCase):
                             "primary_color": "#24577a",
                             "secondary_color": "#35b7a9",
                             "accent_color": "#f08a24",
-                            "preferred_cover_style": "mountain_illustrated",
+                            "preferred_cover_style": "district_branding",
                             "footer_text": "Confidential educational document",
                             "default_filename_template": "",
                         },
@@ -340,11 +369,41 @@ class ProjectWorkflowTests(unittest.TestCase):
                 ),
             )
             self.assertEqual(detail.theme_id, "teacher_friendly")
-            self.assertEqual(detail.packet_template_id, "mountain_illustrated")
+            self.assertEqual(detail.packet_template_id, "district_branding")
             self.assertEqual(detail.brand_kit.district_name, "Gardiner Public Schools")
             themes = projects.list_themes()
-            self.assertEqual([theme.id for theme in themes], ["teacher_friendly", "minimal", "district_colors"])
+            self.assertEqual(
+                [theme.id for theme in themes],
+                [
+                    "teacher_friendly",
+                    "minimal",
+                    "district_colors",
+                    "field_notes",
+                    "editorial_ledger",
+                    "modular_blocks",
+                    "alpine_photo",
+                    "mid_century_classroom",
+                    "typographic_poster",
+                    "signal_atlas",
+                ],
+            )
             self.assertTrue(themes[0].default_customization)
+            self.assertEqual(
+                next(theme for theme in themes if theme.id == "field_notes").default_customization["primary_color"],
+                "#274c3b",
+            )
+            self.assertEqual(
+                next(theme for theme in themes if theme.id == "editorial_ledger").default_customization["primary_color"],
+                "#26364a",
+            )
+            self.assertEqual(
+                next(theme for theme in themes if theme.id == "modular_blocks").default_customization["secondary_color"],
+                "#00a6a6",
+            )
+            self.assertEqual(
+                next(theme for theme in themes if theme.id == "alpine_photo").default_customization["background_color"],
+                "#eaf1f6",
+            )
             updated_builtin_palette = projects.update_theme_palette(
                 "district_colors",
                 projects.ThemePaletteDraft(
@@ -375,7 +434,7 @@ class ProjectWorkflowTests(unittest.TestCase):
                 ThemeSelection.model_validate(
                     {
                         "theme_id": "district_colors",
-                        "packet_template_id": "mountain_illustrated",
+                        "packet_template_id": "district_branding",
                         "customization": detail.theme_customization.model_dump(),
                         "brand_kit": detail.brand_kit.model_dump(),
                     }
@@ -428,6 +487,23 @@ class ProjectWorkflowTests(unittest.TestCase):
             )
             self.assertEqual(updated_palette.name, "Gardiner Gold")
             self.assertEqual(updated_palette.default_customization["primary_color"], "#123456")
+            self.assertEqual(
+                updated_palette.default_customization["service_area_colors"]["Reading"],
+                "#010203",
+            )
+            reloaded_palette = next(
+                theme
+                for theme in projects.list_themes()
+                if theme.id == custom_palette.id
+            )
+            self.assertEqual(
+                reloaded_palette.default_customization["service_area_colors"]["Reading"],
+                "#010203",
+            )
+            self.assertEqual(
+                projects._customization_from_tokens(custom_palette.id).service_area_colors["Reading"],  # noqa: SLF001 - palette service color persistence regression
+                "#010203",
+            )
             detail = projects.upload_brand_logo(
                 session,
                 created.id,
@@ -455,13 +531,98 @@ class ProjectWorkflowTests(unittest.TestCase):
                 ),
             )
             self.assertEqual(detail.export_settings.export_mode, "zip_archive")
-            self.assertTrue(projects.list_packet_templates())
+            packet_templates = projects.list_packet_templates()
+            self.assertTrue(packet_templates)
+            self.assertIn("field_notes", [template.id for template in packet_templates])
+            self.assertIn("editorial_ledger", [template.id for template in packet_templates])
+            self.assertIn("mid_century_classroom", [template.id for template in packet_templates])
+            self.assertIn("typographic_poster", [template.id for template in packet_templates])
+            self.assertIn("signal_atlas", [template.id for template in packet_templates])
+            self.assertTrue(
+                all(
+                    {"category", "cover_style", "best_for"}.isdisjoint(
+                        template.model_dump()
+                    )
+                    for template in packet_templates
+                )
+            )
+            field_notes_template = next(
+                template
+                for template in projects.list_template_library()
+                if template.id == "field_notes"
+            )
+            self.assertEqual(
+                field_notes_template.customization.primary_color,
+                "#274c3b",
+            )
+            self.assertEqual(field_notes_template.theme_id, "field_notes")
+            district_branding_template = next(
+                template
+                for template in projects.list_template_library()
+                if template.id == "district_branding"
+            )
+            self.assertEqual(district_branding_template.theme_id, "district_colors")
+            self.assertEqual(
+                district_branding_template.customization.primary_color,
+                projects._customization_from_tokens("district_colors").primary_color,  # noqa: SLF001 - district branding palette default regression
+            )
+            editorial_template = next(
+                template
+                for template in projects.list_template_library()
+                if template.id == "editorial_ledger"
+            )
+            self.assertEqual(
+                editorial_template.customization.primary_color,
+                "#26364a",
+            )
+            self.assertEqual(editorial_template.theme_id, "editorial_ledger")
+            modular_template = next(
+                template
+                for template in projects.list_template_library()
+                if template.id == "modular_blocks"
+            )
+            self.assertEqual(modular_template.theme_id, "modular_blocks")
+            alpine_template = next(
+                template
+                for template in projects.list_template_library()
+                if template.id == "alpine_photo"
+            )
+            self.assertEqual(alpine_template.theme_id, "alpine_photo")
+            mid_century_template = next(
+                template
+                for template in projects.list_template_library()
+                if template.id == "mid_century_classroom"
+            )
+            self.assertEqual(mid_century_template.theme_id, "mid_century_classroom")
+            self.assertEqual(
+                mid_century_template.customization.primary_color,
+                "#235c64",
+            )
+            typographic_template = next(
+                template
+                for template in projects.list_template_library()
+                if template.id == "typographic_poster"
+            )
+            self.assertEqual(typographic_template.theme_id, "typographic_poster")
+            self.assertEqual(
+                typographic_template.customization.primary_color,
+                "#14233c",
+            )
+            signal_template = next(
+                template
+                for template in projects.list_template_library()
+                if template.id == "signal_atlas"
+            )
+            self.assertEqual(signal_template.theme_id, "signal_atlas")
+            self.assertEqual(
+                signal_template.customization.primary_color,
+                "#102a43",
+            )
             self.assertTrue(projects.list_themes())
             custom_template = projects.create_template_library_item(
                 projects.PacketTemplateLibraryDraft(
                     name="Ryan Template",
                     description="Dashboard managed template.",
-                    category="Custom",
                     base_template_id="district_branding",
                     theme_id=custom_palette.id,
                     customization=projects.ThemeCustomization(
@@ -481,7 +642,6 @@ class ProjectWorkflowTests(unittest.TestCase):
                 projects.PacketTemplateLibraryDraft(
                     name="District Branding",
                     description="District template with saved palette.",
-                    category="District",
                     base_template_id="district_branding",
                     theme_id=custom_palette.id,
                     customization=projects.ThemeCustomization(
@@ -557,12 +717,23 @@ class ProjectWorkflowTests(unittest.TestCase):
                 ),
                 "#4B5563",
             )
+            sample_detail = projects._sample_template_project_detail(  # noqa: SLF001 - template preview sample data regression
+                projects.TemplatePreviewRequest(
+                    name="Sample Preview",
+                    description="Sample preview data.",
+                    base_template_id="district_branding",
+                    theme_id=custom_palette.id,
+                    customization=projects.ThemeCustomization(),
+                )
+            )
+            self.assertEqual(sample_detail.student.school if sample_detail.student else None, "Scranton Elementary")
+            self.assertEqual(sample_detail.brand_kit.school_name, "Scranton Elementary")
+            self.assertNotIn("Gardiner", sample_detail.model_dump_json())
             if renderer_available():
                 preview_pdf = projects.preview_template_library_item(
                     projects.TemplatePreviewRequest(
                         name="Unsaved Preview Template",
                         description="Draft template preview.",
-                        category="Custom",
                         base_template_id="district_branding",
                         theme_id=custom_palette.id,
                         customization=projects.ThemeCustomization(
@@ -691,12 +862,34 @@ class ProjectWorkflowTests(unittest.TestCase):
                 created.id,
                 [item.id for item in projects.list_projects(session, theme_id="teacher_friendly")],
             )
+            custom_packet_config = detail.packet_builder[0].model_copy(deep=True)
+            custom_packet_config.pages.append(
+                PacketPageDraft(
+                    id="custom_para_notes",
+                    title="Para Notes",
+                    page_type="custom_text",
+                    enabled=True,
+                    position=len(custom_packet_config.pages),
+                    body_text="Use this page for paraeducator notes.",
+                )
+            )
             detail = projects.save_packet_builder(
                 session,
                 created.id,
-                PacketBuilderDraft(packet_versions=detail.packet_builder),
+                PacketBuilderDraft(
+                    packet_versions=[
+                        custom_packet_config,
+                        *detail.packet_builder[1:],
+                    ],
+                ),
             )
             self.assertGreater(len(detail.packet_builder), 0)
+            self.assertTrue(
+                all(
+                    any(page.id == "custom_para_notes" for page in config.pages)
+                    for config in detail.packet_builder
+                )
+            )
             html = projects._build_packet_html(  # noqa: SLF001 - regression coverage for generated packet content
                 detail,
                 theme_id="teacher_friendly",
@@ -711,26 +904,114 @@ class ProjectWorkflowTests(unittest.TestCase):
             self.assertIn("Preferential seating", html)
             self.assertIn("Transportation", html)
             self.assertIn("Use pre-correction", html)
+            self.assertIn("Para Notes", html)
+            self.assertIn("Use this page for paraeducator notes.", html)
             self.assertIn("sam.slp@example.edu", html)
             self.assertNotIn("Follow-up / Action", html)
             self.assertIn("New concerns", html)
-            botanical_html = projects._build_packet_html(  # noqa: SLF001 - template rendering regression coverage
+            self.assertIn("Exceptional Student Education", html)
+            self.assertNotIn("Special Education", html)
+            modern_html = projects._build_packet_html(  # noqa: SLF001 - template rendering regression coverage
                 detail,
                 theme_id="teacher_friendly",
-                packet_template_id="botanical_frame",
+                packet_template_id="modern_professional",
                 packet_version_name=detail.packet_versions[0].name,
                 packet_config=detail.packet_builder[0],
             )
-            chalkboard_html = projects._build_packet_html(  # noqa: SLF001 - template rendering regression coverage
+            alpine_html = projects._build_packet_html(  # noqa: SLF001 - template rendering regression coverage
                 detail,
                 theme_id="teacher_friendly",
-                packet_template_id="chalkboard",
+                packet_template_id="alpine_photo",
                 packet_version_name=detail.packet_versions[0].name,
                 packet_config=detail.packet_builder[0],
             )
-            self.assertIn('body class="template-botanical-frame"', botanical_html)
-            self.assertIn('body class="template-chalkboard"', chalkboard_html)
-            self.assertNotEqual(botanical_html, chalkboard_html)
+            self.assertIn('body class="template-modern-professional"', modern_html)
+            self.assertIn("Teacher Responsibilities", modern_html)
+            self.assertIn("<strong>Student:</strong> Cecilia Halpert", modern_html)
+            self.assertIn("<strong>IEP End:</strong> 2027-05-20", modern_html)
+            self.assertIn("specific responsibilities related to this student", modern_html)
+            self.assertIn("Accommodation Receipt Signatures", modern_html)
+            self.assertIn("Staff signing below have reviewed this student", modern_html)
+            self.assertIn("Staff Member:", modern_html)
+            self.assertIn("Date:", modern_html)
+            self.assertIn("Parent Perception of Student Strengths", modern_html)
+            self.assertIn("Parent reports Jordan is kind, curious, and persistent.", modern_html)
+            self.assertIn('body class="template-alpine-photo"', alpine_html)
+            self.assertIn("5.15in solid", alpine_html)
+            self.assertIn("cover-district-mark:after", alpine_html)
+            self.assertNotEqual(modern_html, alpine_html)
+            field_notes_html = projects._build_packet_html(  # noqa: SLF001 - Field Notes rendering regression coverage
+                detail,
+                theme_id="teacher_friendly",
+                packet_template_id="field_notes",
+                packet_version_name=detail.packet_versions[0].name,
+                packet_config=detail.packet_builder[0],
+                customization=projects._customization_for_template("field_notes"),  # noqa: SLF001
+            )
+            self.assertIn('body class="template-field-notes"', field_notes_html)
+            self.assertIn("repeating-radial-gradient", field_notes_html)
+            self.assertIn("#274c3b", field_notes_html)
+            editorial_html = projects._build_packet_html(  # noqa: SLF001 - Editorial Ledger rendering regression coverage
+                detail,
+                theme_id="teacher_friendly",
+                packet_template_id="editorial_ledger",
+                packet_version_name=detail.packet_versions[0].name,
+                packet_config=detail.packet_builder[0],
+                customization=projects._customization_for_template("editorial_ledger"),  # noqa: SLF001
+            )
+            self.assertIn('body class="template-editorial-ledger"', editorial_html)
+            self.assertIn('data-year-mark="27"', editorial_html)
+            self.assertIn("editorial-meta-grid", editorial_html)
+            self.assertIn("cover-version-footer", editorial_html)
+            self.assertIn("Packet version:", editorial_html)
+            self.assertIn("#26364a", editorial_html)
+            modular_html = projects._build_packet_html(  # noqa: SLF001 - Modular Blocks rendering regression coverage
+                detail,
+                theme_id="teacher_friendly",
+                packet_template_id="modular_blocks",
+                packet_version_name=detail.packet_versions[0].name,
+                packet_config=detail.packet_builder[0],
+                customization=projects._customization_for_template("modular_blocks"),  # noqa: SLF001
+            )
+            self.assertIn('body class="template-modular-blocks"', modular_html)
+            self.assertIn("SERVICE AREAS", modular_html)
+            self.assertIn("#17345f", modular_html)
+            self.assertNotEqual(editorial_html, modular_html)
+            mid_century_html = projects._build_packet_html(  # noqa: SLF001 - Mid-Century Classroom rendering regression coverage
+                detail,
+                theme_id="teacher_friendly",
+                packet_template_id="mid_century_classroom",
+                packet_version_name=detail.packet_versions[0].name,
+                packet_config=detail.packet_builder[0],
+                customization=projects._customization_for_template("mid_century_classroom"),  # noqa: SLF001
+            )
+            self.assertIn('body class="template-mid-century-classroom"', mid_century_html)
+            self.assertIn("cover-version-footer", mid_century_html)
+            self.assertIn("Packet version:", mid_century_html)
+            typographic_html = projects._build_packet_html(  # noqa: SLF001 - Typographic rendering regression coverage
+                detail,
+                theme_id="teacher_friendly",
+                packet_template_id="typographic_poster",
+                packet_version_name=detail.packet_versions[0].name,
+                packet_config=detail.packet_builder[0],
+                customization=projects._customization_for_template("typographic_poster"),  # noqa: SLF001
+            )
+            self.assertIn('body class="template-typographic-poster"', typographic_html)
+            self.assertIn("typographic-watermark", typographic_html)
+            self.assertIn("Packet version:", typographic_html)
+            signal_html = projects._build_packet_html(  # noqa: SLF001 - Signal rendering regression coverage
+                detail,
+                theme_id="teacher_friendly",
+                packet_template_id="signal_atlas",
+                packet_version_name=detail.packet_versions[0].name,
+                packet_config=detail.packet_builder[0],
+                customization=projects._customization_for_template("signal_atlas"),  # noqa: SLF001
+            )
+            self.assertIn('body class="template-signal-atlas"', signal_html)
+            self.assertIn("SERVICE AREAS", signal_html)
+            self.assertIn("signal-page-mark", signal_html)
+            self.assertIn("cover-version-footer", signal_html)
+            self.assertIn("#102a43", signal_html)
 
             duplicate = projects.duplicate_project(session, created.id)
             self.assertEqual(len(duplicate.goals), 1)
@@ -818,7 +1099,7 @@ class ProjectWorkflowTests(unittest.TestCase):
                 self.assertTrue(export_path.exists())
                 self.assertGreater(export.size_bytes, 1000)
                 self.assertEqual(export_path.read_bytes()[:4], b"%PDF")
-                self.assertIn("Jordan Rivera", export.filename)
+                self.assertIn("Cecilia Halpert", export.filename)
                 self.assertIn("Base Packet", export.filename)
                 named_export = projects.generate_pdf_export(
                     session,
@@ -830,25 +1111,25 @@ class ProjectWorkflowTests(unittest.TestCase):
                     ),
                 )
                 self.assertEqual(named_export.filename, "Custom Packet Name.pdf")
-                botanical_pdf = projects.generate_pdf_export(
+                modern_pdf = projects.generate_pdf_export(
                     session,
                     created.id,
                     request=projects.ExportRequest(
                         theme_id="teacher_friendly",
-                        packet_template_id="botanical_frame",
-                        filename_template="Botanical Packet.pdf",
+                        packet_template_id="modern_professional",
+                        filename_template="Modern Packet.pdf",
                     ),
                 )
-                chalkboard_pdf = projects.generate_pdf_export(
+                alpine_pdf = projects.generate_pdf_export(
                     session,
                     created.id,
                     request=projects.ExportRequest(
                         theme_id="teacher_friendly",
-                        packet_template_id="chalkboard",
-                        filename_template="Chalkboard Packet.pdf",
+                        packet_template_id="alpine_photo",
+                        filename_template="Alpine Packet.pdf",
                     ),
                 )
-                self.assertNotEqual(botanical_pdf.content_hash, chalkboard_pdf.content_hash)
+                self.assertNotEqual(modern_pdf.content_hash, alpine_pdf.content_hash)
                 zip_export = projects.generate_pdf_export(
                     session,
                     created.id,
@@ -881,7 +1162,7 @@ class ProjectWorkflowTests(unittest.TestCase):
                 self.skipTest("WeasyPrint native rendering libraries are not installed.")
 
             backup = projects.create_project_backup(session, created.id)
-            backup_path = TEST_DATA_DIR / backup.relative_path
+            backup_path = path_module.paths.root / backup.relative_path
             self.assertTrue(backup_path.exists())
             self.assertGreater(backup.size_bytes, 1000)
 

@@ -1,6 +1,9 @@
 import type { PropsWithChildren } from "react";
 import { navigationItems } from "../navigation/navigation";
 import type { AppScreen } from "../types/navigation";
+import { useTerminology } from "../terminology/TerminologyProvider";
+
+const appIconUrl = `${import.meta.env.BASE_URL}app-icon.png`;
 
 interface AppShellProps {
   readonly activeScreen: AppScreen;
@@ -14,11 +17,12 @@ export function AppShell({
   hasProject,
   onNavigate,
 }: PropsWithChildren<AppShellProps>) {
+  const { productName } = useTerminology();
   return <div className="min-h-screen bg-[var(--theme-background)] min-[1565px]:grid min-[1565px]:grid-cols-[17rem_1fr]">
     <aside className="sticky top-0 z-40 border-b border-[var(--theme-border)] bg-[var(--theme-primary)] px-6 py-6 text-white min-[1565px]:static min-[1565px]:min-h-screen min-[1565px]:border-r min-[1565px]:border-b-0">
       <div className="flex items-center gap-3">
-        <div aria-hidden="true" className="grid size-11 place-items-center rounded-2xl bg-white/12 text-xl font-semibold">S</div>
-        <div><p className="text-sm font-semibold tracking-wide">SpEd Packet Studio</p><p className="text-xs text-white/60">Publishing, thoughtfully built</p></div>
+        <img aria-hidden="true" alt="" className="size-11 shrink-0 object-contain" src={appIconUrl} />
+        <div><p className="text-sm font-semibold tracking-wide">{productName}</p><p className="text-xs text-white/60">Beautiful packets. Less paperwork.</p></div>
       </div>
       <nav aria-label="Primary navigation" className="mt-8"><ul className="flex gap-2 overflow-x-auto min-[1565px]:flex-col">
         {navigationItems.map((item) => {
@@ -31,7 +35,7 @@ export function AppShell({
         </button></li>;
         })}
       </ul></nav>
-      <p className="mt-8 hidden text-xs leading-5 text-white/50 min-[1565px]:block">Enter educational information once. Publish it everywhere.</p>
+      <p className="mt-8 hidden text-xs leading-5 text-white/50 min-[1565px]:block">Professional templates, without the design work.</p>
     </aside>
     <main className="min-w-0">{children}</main>
   </div>;

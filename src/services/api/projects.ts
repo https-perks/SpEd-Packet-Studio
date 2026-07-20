@@ -158,11 +158,13 @@ export function getAppSettings() {
   return apiGet<AppSettings>("/projects/app-settings");
 }
 
-export function saveAppSettings(value: AppSettings) {
-  return apiRequest<AppSettings>("/projects/app-settings", {
+export async function saveAppSettings(value: AppSettings) {
+  const saved = await apiRequest<AppSettings>("/projects/app-settings", {
     method: "PUT",
     body: value,
   });
+  window.dispatchEvent(new CustomEvent("packet-studio:settings-changed", { detail: saved }));
+  return saved;
 }
 
 export function createThemePalette(value: ThemePaletteDraft) {
@@ -407,6 +409,7 @@ export async function previewPdfExport(
     filenameTemplate?: string | null;
     exportMode?: ExportMode;
   } = {},
+  signal?: AbortSignal,
 ) {
   const response = await fetch(`${API_BASE_URL}/projects/${projectId}/exports/preview`, {
     method: "POST",
@@ -421,6 +424,7 @@ export async function previewPdfExport(
       filename_template: options.filenameTemplate ?? null,
       export_mode: options.exportMode ?? "single_pdf",
     }),
+    signal,
   });
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { detail?: unknown } | null;

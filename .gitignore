@@ -8,6 +8,13 @@ __pycache__/
 data/
 tmp/
 src-tauri/target/
+src-tauri/binaries/*.exe
+build/pyinstaller/
+build/sidecar-dist/
+build/msix/
+*.pfx
+*.spec
+.dev-data/
 .VSCodeCounter/
 assets\cove-page-icons.ai
 assets\service-icons.ai

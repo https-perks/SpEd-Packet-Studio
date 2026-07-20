@@ -7,15 +7,7 @@ from pydantic import Field, field_validator
 
 from backend.schemas.system import ApiSchema
 
-Audience = Literal[
-    "case_manager",
-    "general_education",
-    "paraeducator",
-    "related_services",
-    "substitute",
-]
-DeliveryModel = Literal["push_in", "pull_out", "combined", "other"]
-
+Audience = str
 DEFAULT_SERVICE_AREA_COLORS = {
     "Math": "#22C55E",
     "Reading": "#2563EB",
@@ -110,11 +102,10 @@ class ServiceAreaDraft(ApiSchema):
     name: str = Field(default="", max_length=160)
     setting: str = Field(default="", max_length=200)
     minutes_per_week: int | None = Field(default=None, ge=0, le=10080)
-    delivery_model: DeliveryModel | None = None
     notes: str = ""
     position: int = Field(default=0, ge=0)
 
-    @field_validator("id", "delivery_model", "minutes_per_week", mode="before")
+    @field_validator("id", "minutes_per_week", mode="before")
     @classmethod
     def normalize_blank_optional_values(cls, value: object) -> object:
         return None if value == "" else value
@@ -166,6 +157,8 @@ class StudentSetupDraft(ApiSchema):
     service_areas: list[ServiceAreaDraft] = Field(default_factory=list)
     audiences: list[Audience] = Field(default_factory=list)
     accommodations: list[AccommodationDraft] = Field(default_factory=list)
+    accommodations_parent_strengths_enabled: bool = False
+    accommodations_parent_strengths: str = Field(default="", max_length=5000)
     behavior_plan: str = Field(default="", max_length=10000)
     behavior_plan_sections: list[BehaviorPlanSectionDraft] = Field(default_factory=list)
     related_service_providers: list[RelatedServiceProviderDraft] = Field(default_factory=list)
@@ -279,12 +272,19 @@ class PacketVersionResponse(ApiSchema):
     audience: str
 
 
+class PacketVersionDraft(ApiSchema):
+    id: str | None = Field(default=None, max_length=80)
+    name: str = Field(default="", max_length=200)
+    audience: str = Field(default="", max_length=120)
+
+
 class PacketPageDraft(ApiSchema):
     id: str = Field(max_length=80)
     title: str = Field(max_length=160)
     page_type: str = Field(max_length=80)
     enabled: bool = True
     position: int = Field(default=0, ge=0)
+    body_text: str = Field(default="", max_length=10000)
 
 
 class AssetPlacementDraft(ApiSchema):
@@ -318,9 +318,6 @@ class PacketTemplateOption(ApiSchema):
     id: str
     name: str
     description: str
-    category: str
-    cover_style: str
-    best_for: str
     page_count_hint: str
 
 
@@ -401,7 +398,6 @@ class PacketTemplateLibraryItem(PacketTemplateOption):
 class PacketTemplateLibraryDraft(ApiSchema):
     name: str = Field(default="", max_length=160)
     description: str = Field(default="", max_length=300)
-    category: str = Field(default="Custom", max_length=80)
     base_template_id: str = Field(default="modern_professional", max_length=80)
     theme_id: str = Field(default="teacher_friendly", max_length=80)
     customization: ThemeCustomization = Field(default_factory=ThemeCustomization)
@@ -460,12 +456,21 @@ class CaseManagerProfile(ApiSchema):
 
 
 class AppSettings(ApiSchema):
+    terminology_preference: Literal["sped", "ese", "ess"] | None = None
     default_school_year: str = Field(default="", max_length=20)
     default_theme_id: str = Field(default="teacher_friendly", max_length=80)
     default_packet_template_id: str = Field(default="modern_professional", max_length=80)
     default_export_settings: ExportSettings = Field(default_factory=ExportSettings)
+    packet_versions: list[PacketVersionDraft] = Field(default_factory=list)
     default_packet_pages: list[PacketPageDraft] = Field(default_factory=list)
     default_observation_checklist: list[str] = Field(default_factory=list)
+    accommodations_teacher_note_enabled: bool = True
+    accommodations_teacher_note_title: str = Field(default="Teacher Responsibilities", max_length=160)
+    accommodations_teacher_note: str = Field(default="", max_length=2000)
+    accommodations_signature_page_enabled: bool = False
+    accommodations_signature_page_title: str = Field(default="Accommodations Signature Page", max_length=160)
+    accommodations_signature_page_note: str = Field(default="", max_length=2000)
+    accommodations_signature_line_layout: Literal["teacher_coach_date", "staff_position_date"] = "teacher_coach_date"
     default_data_sheet_columns: list[DataSheetColumnDraft] = Field(default_factory=list)
     data_sheet_templates: list[DataSheetDraft] = Field(default_factory=list)
     service_area_presets: list[ServiceAreaDraft] = Field(default_factory=list)
@@ -511,6 +516,8 @@ class ProjectDetail(ApiSchema):
     service_areas: list[ServiceAreaResponse]
     audiences: list[Audience]
     accommodations: list[AccommodationDraft] = Field(default_factory=list)
+    accommodations_parent_strengths_enabled: bool = False
+    accommodations_parent_strengths: str = ""
     behavior_plan: str = ""
     behavior_plan_sections: list[BehaviorPlanSectionDraft] = Field(default_factory=list)
     related_service_providers: list[RelatedServiceProviderDraft] = Field(default_factory=list)

@@ -9,6 +9,7 @@ class DatabaseStatus(ApiSchema):
 class HealthResponse(ApiSchema):
     status: Literal["ok"]
     service: str
+    app_version: str
     api_version: str
     database: DatabaseStatus
     pdf_engine: Literal["weasyprint"]

@@ -4,8 +4,8 @@ import { Card } from "../components/ui/Card";
 import { FieldFrame, selectClass, TextArea, TextInput } from "../components/ui/FormField";
 import { WorkflowHeader } from "../components/workflow/WorkflowHeader";
 import { useAutosave } from "../hooks/useAutosave";
-import { saveDataSheets, saveObservationChecklist } from "../services/api/projects";
-import type { DataSheetColumnDraft, DataSheetColumnType, DataSheetDraft, ProjectDetail } from "../types/projects";
+import { saveDataSheets, saveObservationChecklist, savePacketBuilder } from "../services/api/projects";
+import type { DataSheetColumnDraft, DataSheetColumnType, DataSheetDraft, PacketPageDraft, PacketVersionConfig, ProjectDetail } from "../types/projects";
 
 const columnTypes: readonly { value: DataSheetColumnType; label: string }[] = [
   { value: "text", label: "Text" },
@@ -77,20 +77,31 @@ export function ObservationSheetsPage({
         columns: sheet.columns.map((column) => ({ ...column })),
       })),
   );
+  const [packetConfigs, setPacketConfigs] = useState<PacketVersionConfig[]>(() =>
+    project.packet_builder.map((config) => ({
+      packet_version_id: config.packet_version_id,
+      pages: config.pages.map((page) => ({ ...page })),
+      asset_placements: config.asset_placements.map((asset) => ({ ...asset })),
+    })),
+  );
   const [checklist, setChecklist] = useState<string[]>(() => [...project.observation_checklist]);
   const [selectedIndex, setSelectedIndex] = useState(observations.length ? 0 : -1);
+  const [selectedCustomPageId, setSelectedCustomPageId] = useState("");
   const [saveError, setSaveError] = useState("");
   const selected = selectedIndex >= 0 ? observations[selectedIndex] : undefined;
+  const customPages = packetConfigs[0]?.pages.filter((page) => page.page_type === "custom_text") ?? [];
+  const selectedCustomPage = customPages.find((page) => page.id === selectedCustomPageId) ?? customPages[0];
 
   const autosave = useAutosave({
-    value: { observations, checklist },
+    value: { observations, checklist, packetConfigs },
     delayMs: 850,
     save: async (value, signal) => {
       try {
         const savedSheets = await saveDataSheets(project.id, [...regularSheets, ...value.observations], signal);
         const savedChecklist = await saveObservationChecklist(project.id, value.checklist, signal);
+        const savedPackets = await savePacketBuilder(project.id, value.packetConfigs, signal);
         setSaveError("");
-        onProjectUpdate({ ...savedSheets, observation_checklist: savedChecklist.observation_checklist });
+        onProjectUpdate({ ...savedPackets, data_sheets: savedSheets.data_sheets, observation_checklist: savedChecklist.observation_checklist });
       } catch (reason) {
         if (signal.aborted) return;
         setSaveError(reason instanceof Error ? reason.message : "Observation sheets could not be saved.");
@@ -129,12 +140,56 @@ export function ObservationSheetsPage({
     setSelectedIndex((current) => Math.min(current, observations.length - 2));
   }
 
+  function addCustomPage() {
+    const id = `custom_${crypto.randomUUID()}`;
+    setSelectedCustomPageId(id);
+    setPacketConfigs((current) =>
+      current.map((config) => ({
+        ...config,
+        pages: [
+          ...config.pages,
+          {
+            id,
+            title: "Custom Page",
+            page_type: "custom_text",
+            enabled: true,
+            position: config.pages.length,
+            body_text: "",
+          },
+        ],
+      })),
+    );
+  }
+
+  function updateCustomPage(pageId: string, patch: Partial<Pick<PacketPageDraft, "title" | "body_text">>) {
+    setPacketConfigs((current) =>
+      current.map((config) => ({
+        ...config,
+        pages: config.pages.map((page) =>
+          page.id === pageId ? { ...page, ...patch } : page,
+        ),
+      })),
+    );
+  }
+
+  function deleteCustomPage(pageId: string) {
+    setSelectedCustomPageId((current) => current === pageId ? "" : current);
+    setPacketConfigs((current) =>
+      current.map((config) => ({
+        ...config,
+        pages: config.pages
+          .filter((page) => page.id !== pageId)
+          .map((page, position) => ({ ...page, position })),
+      })),
+    );
+  }
+
   return (
     <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
       <WorkflowHeader
         eyebrow="Step 5 of 7"
         title={`Observation Sheets${project.student?.name ? ` - ${project.student.name}` : ""}`}
-        description="Create standalone observation forms and customize the staff-to-case-manager checklist."
+        description="Staff notes and custom pages."
         status={autosave.status}
         actions={<Button onClick={addObservation}>Add Observation Sheet</Button>}
       />
@@ -146,21 +201,51 @@ export function ObservationSheetsPage({
       )}
 
       <div className="grid gap-5 xl:grid-cols-[21rem_1fr]">
-        <Card title="Observation sheets" description="These are separate from goal data collection.">
-          <div className="space-y-2">
-            {observations.map((sheet, index) => (
-              <button
-                key={sheet.id ?? `observation-${index}`}
-                className={`w-full rounded-xl border px-3 py-3 text-left text-sm ${index === selectedIndex ? "border-[var(--theme-primary)] bg-[var(--theme-primary-soft)]" : "border-[var(--theme-border)] bg-white"}`}
-                onClick={() => setSelectedIndex(index)}
-              >
-                <span className="block font-semibold">{sheet.title || "Untitled observation sheet"}</span>
-                <span className="text-xs text-[var(--theme-text-muted)]">{sheet.columns.length} columns</span>
-              </button>
-            ))}
-            {!observations.length && <Button onClick={addObservation}>Add the first observation sheet</Button>}
-          </div>
-        </Card>
+        <div className="space-y-5 self-start">
+          <Card title="Observation sheets" description="Separate from goal data collection.">
+            <div className="space-y-2">
+              {observations.map((sheet, index) => (
+                <button
+                  key={sheet.id ?? `observation-${index}`}
+                  className={`w-full rounded-xl border px-3 py-3 text-left text-sm ${index === selectedIndex ? "border-[var(--theme-primary)] bg-[var(--theme-primary-soft)]" : "border-[var(--theme-border)] bg-white"}`}
+                  onClick={() => setSelectedIndex(index)}
+                >
+                  <span className="block font-semibold">{sheet.title || "Untitled observation sheet"}</span>
+                  <span className="text-xs text-[var(--theme-text-muted)]">{sheet.columns.length} columns</span>
+                </button>
+              ))}
+              {!observations.length && <Button onClick={addObservation}>Add the first observation sheet</Button>}
+            </div>
+          </Card>
+
+          <Card
+            title="Custom pages"
+            description="Blank pages or staff notes."
+            actions={<Button variant="outline" onClick={addCustomPage} disabled={!packetConfigs.length}>Add</Button>}
+          >
+            {customPages.length ? (
+              <div className="space-y-2">
+                {customPages.map((page) => (
+                  <button
+                    key={page.id}
+                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm ${page.id === selectedCustomPage?.id ? "border-[var(--theme-primary)] bg-[var(--theme-primary-soft)]" : "border-[var(--theme-border)] bg-white"}`}
+                    onClick={() => setSelectedCustomPageId(page.id)}
+                  >
+                    <span className="block font-semibold">{page.title || "Custom Page"}</span>
+                    <span className="text-xs text-[var(--theme-text-muted)]">
+                      {page.body_text?.trim() ? "Text page" : "Blank lined page"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-[var(--theme-border)] p-4 text-center">
+                <p className="text-sm text-[var(--theme-text-muted)]">No custom pages yet.</p>
+                <Button className="mt-3" onClick={addCustomPage} disabled={!packetConfigs.length}>Add Custom Page</Button>
+              </div>
+            )}
+          </Card>
+        </div>
 
         <div className="space-y-5">
           <Card
@@ -213,6 +298,43 @@ export function ObservationSheetsPage({
             </div>
             <Button className="mt-3" variant="outline" onClick={() => setChecklist((current) => [...current, ""])}>Add Bullet</Button>
           </Card>
+
+          {customPages.length > 0 && (
+            <Card
+              title="Custom page editor"
+              description="Add text, or leave a page body blank for a lined page."
+            >
+              <div className="space-y-5">
+                {customPages.map((page, index) => (
+                  <section key={page.id} className="rounded-xl border border-[var(--theme-border)] bg-white p-4">
+                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-[var(--theme-text)]">
+                        Custom page {index + 1}
+                      </p>
+                      <Button variant="danger" onClick={() => deleteCustomPage(page.id)}>Delete</Button>
+                    </div>
+                    <div className="grid gap-4">
+                      <FieldFrame label="Page title" htmlFor={`${page.id}-title`}>
+                        <TextInput
+                          id={`${page.id}-title`}
+                          value={page.title}
+                          onChange={(event) => updateCustomPage(page.id, { title: event.target.value })}
+                        />
+                      </FieldFrame>
+                      <FieldFrame label="Page text" htmlFor={`${page.id}-body`}>
+                        <TextArea
+                          id={`${page.id}-body`}
+                          value={page.body_text ?? ""}
+                          onChange={(event) => updateCustomPage(page.id, { body_text: event.target.value })}
+                          placeholder="Leave blank for a lined blank page, or add notes/instructions to print on the page."
+                        />
+                      </FieldFrame>
+                    </div>
+                  </section>
+                ))}
+              </div>
+            </Card>
+          )}
         </div>
       </div>
 

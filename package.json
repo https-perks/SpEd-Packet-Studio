@@ -1,7 +1,7 @@
 {
   "name": "sped-packet-studio",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,16 @@
     "desktop:dev": "node scripts/dev.mjs",
     "backend:dev": "python -m backend",
     "backend:check": "python -m compileall backend",
-    "backend:test": "python -m unittest discover -s backend/tests -v"
+    "backend:test": "python -m unittest discover -s backend/tests -v",
+    "version:sync": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-version.ps1",
+    "native:prepare": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-weasyprint-native.ps1",
+    "sidecar:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-sidecar.ps1",
+    "desktop:build": "pnpm sidecar:build && pnpm tauri build",
+    "windows:nsis": "pnpm sidecar:build && pnpm tauri build --bundles nsis",
+    "windows:msi": "pnpm sidecar:build && pnpm tauri build --bundles msi",
+    "windows:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows-release.ps1 -Bundle nsis",
+    "windows:verify": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows-package.ps1",
+    "msix:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-msix.ps1"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",

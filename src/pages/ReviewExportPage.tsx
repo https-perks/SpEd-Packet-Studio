@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -121,6 +121,7 @@ export function ReviewExportPage({
   const [backingUp, setBackingUp] = useState(false);
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
+  const previewAbortRef = useRef<AbortController | null>(null);
   const validation = combinedValidation(project);
 
   useEffect(() => {
@@ -131,6 +132,13 @@ export function ReviewExportPage({
       .then((kits) => setBrandKits(kits.filter((kit) => kit.id !== "personal")))
       .catch(() => setBrandKits([]));
   }, []);
+
+  useEffect(() => {
+    return () => {
+      previewAbortRef.current?.abort();
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   function brandKitForSelection(brandKitId: string): BrandKit {
     const selected = brandKits.find((kit) => kit.id === brandKitId);
@@ -172,6 +180,9 @@ export function ReviewExportPage({
   }
 
   async function handlePreview() {
+    previewAbortRef.current?.abort();
+    const controller = new AbortController();
+    previewAbortRef.current = controller;
     setPreviewing(true);
     setError("");
     try {
@@ -182,12 +193,16 @@ export function ReviewExportPage({
         packetTemplateId: selectedTemplateId,
         filenameTemplate: null,
         exportMode: "single_pdf",
-      });
+      }, controller.signal);
       setPreviewUrl(URL.createObjectURL(blob));
     } catch (reason) {
+      if (controller.signal.aborted) return;
       setError(reason instanceof Error ? reason.message : "The PDF preview could not be created.");
     } finally {
-      setPreviewing(false);
+      if (previewAbortRef.current === controller) {
+        previewAbortRef.current = null;
+        setPreviewing(false);
+      }
     }
   }
 
@@ -306,13 +321,8 @@ export function ReviewExportPage({
                   className={`rounded-xl border p-4 text-left transition ${selectedTemplateId === template.id ? "border-[var(--theme-primary)] bg-[var(--theme-primary-soft)]" : "border-[var(--theme-border)] bg-white hover:bg-[var(--theme-surface-muted)]"}`}
                   onClick={() => void saveThemeSettings({ templateId: template.id })}
                 >
-                  <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--theme-accent)]">{template.category}</span>
                   <span className="mt-1 block font-semibold text-[var(--theme-text)]">{template.name}</span>
                   <span className="mt-2 block text-xs leading-5 text-[var(--theme-text-muted)]">{template.description}</span>
-                  <span className="mt-3 block rounded-lg border border-[var(--theme-border)] bg-white p-3 text-xs text-[var(--theme-text-muted)]">
-                    Cover: {template.cover_style}<br />
-                    Best for: {template.best_for}
-                  </span>
                 </button>
               ))}
             </div>

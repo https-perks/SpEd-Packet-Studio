@@ -1,4 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { FolioSplash } from "./components/app/FolioSplash";
+import { TerminologyOnboarding } from "./components/onboarding/TerminologyOnboarding";
 import { AppShell } from "./layouts/AppShell";
 import { AtAGlancePage } from "./pages/AtAGlancePage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -8,9 +11,11 @@ import { ObservationSheetsPage } from "./pages/ObservationSheetsPage";
 import { PacketDesignerPage } from "./pages/PacketDesignerPage";
 import { ReviewExportPage } from "./pages/ReviewExportPage";
 import { StudentSetupPage } from "./pages/StudentSetupPage";
-import { getProject } from "./services/api/projects";
+import { getAppSettings, getProject, saveAppSettings } from "./services/api/projects";
+import { getSystemHealth } from "./services/api/system";
+import { TerminologyProvider } from "./terminology/TerminologyProvider";
 import type { AppScreen } from "./types/navigation";
-import type { ProjectDetail, ProjectSummary } from "./types/projects";
+import type { AppSettings, ProjectDetail, ProjectSummary, TerminologyPreference } from "./types/projects";
 
 function stepToScreen(step: ProjectSummary["current_step"]): AppScreen {
   if (step === "complete") return "review";
@@ -23,6 +28,81 @@ export function App() {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [settingsError, setSettingsError] = useState("");
+  const [savingTerminology, setSavingTerminology] = useState(false);
+  const [showStartupSplash, setShowStartupSplash] = useState(true);
+  const [backendReady, setBackendReady] = useState(false);
+  const [startupMessage, setStartupMessage] = useState("Opening the studio...");
+
+  useEffect(() => {
+    let cancelled = false;
+    const startedAt = Date.now();
+
+    async function waitForBackend() {
+      const deadline = Date.now() + 60_000;
+      let attempts = 0;
+      while (!cancelled && Date.now() < deadline) {
+        attempts += 1;
+        try {
+          await getSystemHealth();
+          const elapsed = Date.now() - startedAt;
+          window.setTimeout(() => {
+            if (!cancelled) {
+              setBackendReady(true);
+              setShowStartupSplash(false);
+            }
+          }, Math.max(0, 1400 - elapsed));
+          return;
+        } catch {
+          if (attempts === 8) setStartupMessage("Starting the local packet engine...");
+          if (attempts === 24) setStartupMessage("First launch can take a little longer...");
+          await new Promise((resolve) => window.setTimeout(resolve, 500));
+        }
+      }
+      if (!cancelled) {
+        setStartupMessage("The local packet engine is taking longer than expected.");
+      }
+    }
+
+    void waitForBackend();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!backendReady) return;
+    void getAppSettings().then(setAppSettings).catch((reason) => {
+      setSettingsError(reason instanceof Error ? reason.message : "Application settings could not be loaded.");
+    });
+    const updateSettings = (event: Event) => setAppSettings((event as CustomEvent<AppSettings>).detail);
+    window.addEventListener("packet-studio:settings-changed", updateSettings);
+    return () => window.removeEventListener("packet-studio:settings-changed", updateSettings);
+  }, [backendReady]);
+
+  const terminology = appSettings?.terminology_preference ?? "sped";
+  useEffect(() => {
+    const acronym = terminology === "ese" ? "ESE" : terminology === "ess" ? "ESS" : "SpEd";
+    const title = `${acronym} Packet Studio`;
+    document.title = title;
+    if ("__TAURI_INTERNALS__" in window) {
+      void getCurrentWindow().setTitle(title).catch((reason) => {
+        console.error("Could not update the application window title.", reason);
+      });
+    }
+  }, [terminology]);
+
+  async function chooseTerminology(preference: TerminologyPreference) {
+    if (!appSettings) return;
+    setSavingTerminology(true);
+    setSettingsError("");
+    try {
+      setAppSettings(await saveAppSettings({ ...appSettings, terminology_preference: preference }));
+    } catch (reason) {
+      setSettingsError(reason instanceof Error ? reason.message : "The terminology preference could not be saved.");
+    } finally {
+      setSavingTerminology(false);
+    }
+  }
 
   const openProject = useCallback(async (value: ProjectSummary | ProjectDetail) => {
     setLoading(true);
@@ -123,12 +203,14 @@ export function App() {
     );
   }
 
+  if (showStartupSplash) {
+    return <FolioSplash message={startupMessage} />;
+  }
+
   let content;
   if (loading) {
     content = (
-      <div className="grid min-h-screen place-items-center text-sm text-[var(--theme-text-muted)]">
-        Opening project...
-      </div>
+      <FolioSplash message="Opening project..." />
     );
   } else if (screen === "dashboard" || !project) {
     content = (
@@ -214,8 +296,16 @@ export function App() {
   }
 
   return (
-    <AppShell activeScreen={screen} hasProject={project !== null} onNavigate={navigate}>
-      {content}
-    </AppShell>
+    <TerminologyProvider preference={terminology}>
+      <AppShell activeScreen={screen} hasProject={project !== null} onNavigate={navigate}>
+        {content}
+      </AppShell>
+      {appSettings && !appSettings.terminology_preference && (
+        <TerminologyOnboarding saving={savingTerminology} error={settingsError} onContinue={(value) => void chooseTerminology(value)} />
+      )}
+      {!appSettings && settingsError && (
+        <div className="fixed inset-x-6 bottom-6 z-[110] rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">{settingsError}</div>
+      )}
+    </TerminologyProvider>
   );
 }

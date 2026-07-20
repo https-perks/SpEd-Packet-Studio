@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { TextArea, TextInput } from "../components/ui/FormField";
+import { terminologyOptions, useTerminology } from "../terminology/TerminologyProvider";
 import {
   applyBulkProjectAction,
   archiveProject,
@@ -51,10 +53,13 @@ import type {
 } from "../types/projects";
 
 type SettingsModal =
+  | "terminology"
   | "school_year"
   | "export"
   | "packet_pages"
+  | "packet_versions"
   | "observation_checklist"
+  | "accommodations"
   | "data_sheet_templates"
   | "service_presets"
   | "case_manager"
@@ -181,6 +186,7 @@ function blankDataSheetTemplate(position: number): DataSheetDraft {
 }
 
 const defaultAppSettings: AppSettings = {
+  terminology_preference: null,
   default_school_year: "",
   default_theme_id: "teacher_friendly",
   default_packet_template_id: "modern_professional",
@@ -189,15 +195,23 @@ const defaultAppSettings: AppSettings = {
     last_export_location: "",
     export_mode: "single_pdf",
   },
+  packet_versions: [
+    { id: null, name: "Case Manager", audience: "case_manager" },
+    { id: null, name: "General Education", audience: "general_education" },
+    { id: null, name: "Paraeducator", audience: "paraeducator" },
+    { id: null, name: "Related Services", audience: "related_services" },
+    { id: null, name: "Substitute", audience: "substitute" },
+  ],
   default_packet_pages: [
     { id: "cover", title: "Cover Page", page_type: "cover", enabled: true, position: 0 },
     { id: "at_a_glance", title: "At-a-Glance", page_type: "at_a_glance", enabled: true, position: 1 },
     { id: "accommodations", title: "Accommodations/Modifications", page_type: "placeholder", enabled: true, position: 2 },
-    { id: "behavior", title: "Behavior Plans", page_type: "placeholder", enabled: true, position: 3 },
-    { id: "goal_summary", title: "Goal Summary", page_type: "goal_summary", enabled: true, position: 4 },
-    { id: "services", title: "Service Areas", page_type: "services", enabled: true, position: 5 },
-    { id: "data_collection", title: "Data Collection", page_type: "data_collection", enabled: true, position: 6 },
-    { id: "observations", title: "Observations & Notes", page_type: "observations", enabled: true, position: 7 },
+    { id: "accommodations_signature", title: "Accommodations Signature Page", page_type: "placeholder", enabled: true, position: 3 },
+    { id: "behavior", title: "Behavior Plans", page_type: "placeholder", enabled: true, position: 4 },
+    { id: "goal_summary", title: "Goal Summary", page_type: "goal_summary", enabled: true, position: 5 },
+    { id: "services", title: "Service Areas", page_type: "services", enabled: true, position: 6 },
+    { id: "data_collection", title: "Data Collection", page_type: "data_collection", enabled: true, position: 7 },
+    { id: "observations", title: "Observations & Notes", page_type: "observations", enabled: true, position: 8 },
   ],
   default_observation_checklist: [
     "Consistently struggling despite accommodations",
@@ -211,6 +225,15 @@ const defaultAppSettings: AppSettings = {
     "Concerns from parents",
     "Other observations",
   ],
+  accommodations_teacher_note_enabled: true,
+  accommodations_teacher_note_title: "Teacher Responsibilities",
+  accommodations_teacher_note:
+    "In order to help this student be successful, you need to be informed of your specific responsibilities related to this student and the accommodations, modifications and supports that must be provided for this student. If you have any questions or need further information, please talk to the case manager.",
+  accommodations_signature_page_enabled: false,
+  accommodations_signature_page_title: "Accommodations Signature Page",
+  accommodations_signature_page_note:
+    "The following staff have been informed of their specific responsibilities related to this student and the accommodations, modifications and supports that must be provided.",
+  accommodations_signature_line_layout: "teacher_coach_date",
   default_data_sheet_columns: [
     { id: "date", title: "Date", column_type: "date", position: 0 },
     { id: "trial", title: "Trial", column_type: "text", position: 1 },
@@ -330,7 +353,6 @@ function templateDraftFromItem(item?: PacketTemplateLibraryItem): PacketTemplate
   return {
     name: item?.name ?? "Custom Template",
     description: item?.description ?? "",
-    category: item?.category ?? "Custom",
     base_template_id: baseTemplateId,
     theme_id: themeId,
     customization,
@@ -376,13 +398,24 @@ function fileToBase64(file: File) {
 const basePreviewTone: Record<string, { panel: string; accent: string; mode: "light" | "dark"; label: string }> = {
   modern_professional: { panel: "linear-gradient(132deg, #ffffff 0%, #ffffff 58%, rgba(67,192,189,0.14) 58%, rgba(67,192,189,0.14) 100%)", accent: "#0f8b8d", mode: "light", label: "Geometric" },
   district_branding: { panel: "linear-gradient(180deg, #ffffff, #ffffff)", accent: "#d89a2b", mode: "light", label: "Logo-ready" },
-  mountain_illustrated: { panel: "linear-gradient(180deg, #f7ffff 0%, #d7f3f0 55%, #0b6b78 100%)", accent: "#0f766e", mode: "light", label: "Landscape" },
-  elementary_pop: { panel: "radial-gradient(circle at 12% 18%, #f08a24 0 12%, transparent 13%), radial-gradient(circle at 84% 14%, #35b7a9 0 10%, transparent 11%), #fff7e8", accent: "#ef7900", mode: "light", label: "Playful" },
   alpine_photo: { panel: "linear-gradient(115deg, #071827 0 58%, #1f6fb8 58% 100%)", accent: "#149fe3", mode: "dark", label: "Bold" },
-  botanical_frame: { panel: "radial-gradient(circle at 9% 10%, #dcebd8 0 18%, transparent 19%), #fbfbf5", accent: "#557a46", mode: "light", label: "Botanical" },
-  chalkboard: { panel: "linear-gradient(135deg, #1f2933, #111827)", accent: "#38bdf8", mode: "dark", label: "Chalkboard" },
-  soft_organic: { panel: "radial-gradient(circle at 84% 14%, #ead8bd 0 18%, transparent 19%), #fbf6ed", accent: "#9b7f5f", mode: "light", label: "Organic" },
-  purple_dot: { panel: "radial-gradient(circle, rgba(126,87,194,.38) 0 2px, transparent 2px) right center / 15px 15px, linear-gradient(90deg, #ffffff 0 64%, #f3e8ff 64%)", accent: "#6d3fc0", mode: "light", label: "Editorial" },
+  field_notes: { panel: "repeating-radial-gradient(ellipse at 92% 12%, transparent 0 15px, rgba(39,76,59,.06) 16px, transparent 17px 30px), #f4f0e6", accent: "#b86b3c", mode: "light", label: "Field Journal" },
+  editorial_ledger: { panel: "linear-gradient(180deg, #fffdf9 0 92%, #f2efe9 92%)", accent: "#8a5a44", mode: "light", label: "Editorial" },
+  modular_blocks: { panel: "linear-gradient(135deg, #ffffff 0 56%, #17345f 56% 82%, #eef2f5 82%)", accent: "#e56b2f", mode: "light", label: "Modular" },
+  mid_century_classroom: { panel: "linear-gradient(135deg, #f3ead7 0 66%, rgba(255,255,255,.42) 66% 100%)", accent: "#b6583f", mode: "light", label: "Mid-Century" },
+  typographic_poster: { panel: "linear-gradient(180deg, #f3f0e8 0 78%, #14233c 78% 100%)", accent: "#d5633c", mode: "light", label: "Typographic" },
+  signal_atlas: { panel: "linear-gradient(180deg, #102a43 0 67%, #eef3f5 67% 100%)", accent: "#ff8a3d", mode: "dark", label: "Signal" },
+};
+
+const defaultPaletteByTemplate: Record<string, string> = {
+  alpine_photo: "alpine_photo",
+  district_branding: "district_colors",
+  editorial_ledger: "editorial_ledger",
+  field_notes: "field_notes",
+  mid_century_classroom: "mid_century_classroom",
+  modular_blocks: "modular_blocks",
+  typographic_poster: "typographic_poster",
+  signal_atlas: "signal_atlas",
 };
 
 export function TemplateLivePreview({
@@ -392,6 +425,7 @@ export function TemplateLivePreview({
   readonly draft: PacketTemplateLibraryDraft;
   readonly baseTemplate?: PacketTemplateOption;
 }) {
+  const { fullTitle } = useTerminology();
   const baseId = baseTemplate?.id ?? draft.base_template_id;
   const tone = basePreviewTone[baseId] ?? basePreviewTone.modern_professional;
   const colors = draft.customization;
@@ -404,21 +438,12 @@ export function TemplateLivePreview({
   const districtAccent = colors.accent_color;
   const coverTextColor = isModern ? "#0d2848" : isDistrict ? districtPrimary : textColor;
   const bottomTextColor = isModern || isDistrict ? "#ffffff" : textColor;
-  const coverTitleStyle = baseId === "botanical_frame" || baseId === "soft_organic"
-    ? { fontFamily: "Georgia, serif", letterSpacing: "0.04em" }
-    : baseId === "elementary_pop"
-      ? { letterSpacing: "0.06em", textShadow: "2px 2px 0 rgba(244,169,55,.22)" }
-      : {};
-  const pageAccentStyle = baseId === "alpine_photo" || baseId === "chalkboard"
-    ? { backgroundColor: baseId === "alpine_photo" ? "#0d1f35" : "#1f2933", color: "#ffffff", borderColor: "transparent" }
+  const pageAccentStyle = baseId === "alpine_photo"
+    ? { backgroundColor: "#0d1f35", color: "#ffffff", borderColor: "transparent" }
     : baseId === "district_branding"
       ? { backgroundColor: colors.card_color, borderColor: districtPrimary, color: colors.text_color, borderTop: `8px solid ${districtPrimary}`, borderBottom: `8px solid ${districtAccent}` }
-    : baseId === "botanical_frame"
-      ? { backgroundColor: "#fbfaf5", borderColor: "#9fb695", color: "#3f544c" }
-      : baseId === "elementary_pop"
-        ? { backgroundColor: "#fff7e8", borderColor: "#f3c27a", color: "#275769" }
-        : { backgroundColor: colors.card_color, borderColor: "#dbe5f1", color: colors.text_color };
-  const cardRadius = baseId === "botanical_frame" ? "rounded-sm" : baseId === "elementary_pop" || baseId === "soft_organic" ? "rounded-2xl" : "rounded-lg";
+      : { backgroundColor: colors.card_color, borderColor: "#dbe5f1", color: colors.text_color };
+  const cardRadius = "rounded-lg";
 
   return (
     <div className="rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-surface-muted)] p-4">
@@ -448,12 +473,10 @@ export function TemplateLivePreview({
             )}
             <div className="absolute -bottom-10 left-4 h-28 w-40 rotate-45 opacity-25" style={{ backgroundColor: tone.accent }} />
             <div className="absolute -right-10 bottom-8 h-32 w-44 rotate-45 opacity-20" style={{ backgroundColor: colors.secondary_color }} />
-            {baseId === "mountain_illustrated" && <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-teal-950/70 to-transparent" />}
-            {baseId === "purple_dot" && <div className="absolute right-0 top-0 h-full w-28 opacity-70" style={{ backgroundImage: "radial-gradient(circle, rgba(126,87,194,.42) 0 2px, transparent 2px)", backgroundSize: "14px 14px" }} />}
             <div className="relative text-center">
               <div className={`mx-auto mb-4 grid h-14 w-14 place-items-center text-lg font-black shadow-lg ${isModern ? "rounded-2xl" : "rounded-full"}`} style={{ backgroundColor: isDistrict ? districtPrimary : tone.accent, color: "#ffffff" }}>SP</div>
-              <p className="text-[0.62rem] font-bold uppercase tracking-[0.28em]" style={{ color: isDistrict ? districtAccent : tone.accent }}>Special Education</p>
-              <h4 className="mt-3 text-4xl font-black uppercase leading-none tracking-normal" style={{ color: coverTextColor, ...coverTitleStyle }}>Service<br />Packet</h4>
+              <p className="text-[0.62rem] font-bold uppercase tracking-[0.28em]" style={{ color: isDistrict ? districtAccent : tone.accent }}>{fullTitle}</p>
+              <h4 className="mt-3 text-4xl font-black uppercase leading-none tracking-normal" style={{ color: coverTextColor }}>Service<br />Packet</h4>
               <div className="mx-auto mt-5 max-w-[14rem] px-5 py-2 text-center text-sm font-bold text-white" style={{ backgroundColor: isDistrict ? districtAccent : colors.secondary_color }}>2026-2027</div>
               <p className="mt-5 text-lg font-black uppercase" style={{ color: isDistrict ? districtPrimary : tone.accent }}>Sample Student</p>
             </div>
@@ -466,7 +489,7 @@ export function TemplateLivePreview({
                   </div>
                 ))}
               </div>
-              <div className={`grid grid-cols-2 gap-2 ${baseId === "district_branding" || baseId === "botanical_frame" ? "border border-slate-300 bg-white/70" : ""} p-2 text-[0.55rem]`}>
+              <div className={`grid grid-cols-2 gap-2 ${baseId === "district_branding" ? "border border-slate-300 bg-white/70" : ""} p-2 text-[0.55rem]`}>
                 {["Grade 4", "IEP 2026-2027", "Case Manager", "School"].map((label) => (
                   <div key={label} className="rounded-md border border-white/20 bg-white/10 p-2 font-bold" style={{ color: bottomTextColor }}>{label}</div>
                 ))}
@@ -579,6 +602,7 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
   const [templateDraft, setTemplateDraft] = useState<PacketTemplateLibraryDraft>(templateDraftFromItem());
   const [paletteDraft, setPaletteDraft] = useState<ThemePaletteDraft>(paletteDraftFromTheme(undefined, templateDraftFromItem().customization));
   const [editingTemplate, setEditingTemplate] = useState(false);
+  const [paletteEditorOpen, setPaletteEditorOpen] = useState(false);
   const [previewingTemplate, setPreviewingTemplate] = useState<PacketTemplateLibraryItem | null>(null);
   const [templatePreviewUrl, setTemplatePreviewUrl] = useState("");
   const [templatePreviewLoading, setTemplatePreviewLoading] = useState(false);
@@ -757,6 +781,23 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
     }
   }
 
+  async function chooseDefaultExportFolder() {
+    setError("");
+    try {
+      const folder = await invoke<string | null>("select_folder");
+      if (!folder) return;
+      setAppSettings({
+        ...appSettings,
+        default_export_settings: {
+          ...appSettings.default_export_settings,
+          last_export_location: folder,
+        },
+      });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The export folder picker could not be opened.");
+    }
+  }
+
   function openTemplateEditor(template?: PacketTemplateLibraryItem) {
     setSelectedTemplate(template ?? null);
     const draft = templateDraftFromItem(template);
@@ -764,7 +805,7 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
       draft.base_template_id = "modern_professional";
     }
     if (themes.length && !themes.some((theme) => theme.id === draft.theme_id)) {
-      const preferredFallback = draft.base_template_id === "district_branding" ? "district_colors" : "teacher_friendly";
+      const preferredFallback = defaultPaletteByTemplate[draft.base_template_id] ?? "teacher_friendly";
       draft.theme_id = themes.some((theme) => theme.id === preferredFallback)
         ? preferredFallback
         : themes[0].id;
@@ -778,6 +819,7 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
     setPaletteDraft(paletteDraftFromTheme(theme, draft.customization));
     setTemplatePreviewError("");
     setTemplatePreviewDirty(true);
+    setPaletteEditorOpen(false);
     setEditingTemplate(true);
   }
 
@@ -796,7 +838,7 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
       },
     };
     updateTemplateDraft({ ...templateDraft, customization });
-    setPaletteDraft({ ...paletteDraft, customization });
+    setPaletteDraft((current) => ({ ...current, customization }));
   }
 
   async function updateTemplatePreview(draft: PacketTemplateLibraryDraft = templateDraft) {
@@ -998,15 +1040,20 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
   async function saveBrandKitEditor() {
     setError("");
     try {
-      const saved = selectedBrandKit
-        ? await updateBrandKit(selectedBrandKit.id, brandKitDraft)
-        : await createBrandKit(brandKitDraft);
-      setSelectedBrandKit(saved);
-      setBrandKitDraft(brandKitDraftFromItem(saved));
-      await refreshBrandKits();
+      await saveCurrentBrandKitDraft();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Brand Kit could not be saved.");
     }
+  }
+
+  async function saveCurrentBrandKitDraft() {
+    const saved = selectedBrandKit
+      ? await updateBrandKit(selectedBrandKit.id, brandKitDraft)
+      : await createBrandKit(brandKitDraft);
+    setSelectedBrandKit(saved);
+    setBrandKitDraft(brandKitDraftFromItem(saved));
+    await refreshBrandKits();
+    return saved;
   }
 
   async function duplicateSelectedBrandKit() {
@@ -1047,11 +1094,12 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
   }
 
   async function uploadSelectedBrandKitLogo(file: File | null, logoKind: "cover" | "watermark" = "cover") {
-    if (!file || !selectedBrandKit) return;
+    if (!file) return;
     setError("");
     try {
+      const brandKit = await saveCurrentBrandKitDraft();
       const saved = await uploadBrandKitLogo({
-        brandKitId: selectedBrandKit.id,
+        brandKitId: brandKit.id,
         filename: file.name,
         contentType: file.type || "application/octet-stream",
         dataBase64: await fileToBase64(file),
@@ -1234,7 +1282,7 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                 </dl>
                 <div className="mt-4 flex flex-wrap gap-2 text-xs">
                   {project.case_manager && <span className="rounded-full bg-[var(--theme-surface-muted)] px-2.5 py-1 text-[var(--theme-text-muted)]">{project.case_manager}</span>}
-                  {project.service_areas.slice(0, 3).map((area) => <span key={area} className="rounded-full bg-[var(--theme-primary-soft)] px-2.5 py-1 text-[var(--theme-primary)]">{area}</span>)}
+                  {project.service_areas.map((area) => <span key={area} className="rounded-full bg-[var(--theme-primary-soft)] px-2.5 py-1 text-[var(--theme-primary)]">{area}</span>)}
                   {project.missing_data_sheets && <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-800">Needs data sheets</span>}
                 </div>
                 <div className="mt-auto flex flex-wrap gap-2 pt-6">
@@ -1295,7 +1343,6 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                 <button className="w-full text-left" onClick={() => setSelectedTemplate(template)} type="button">
                   <span className="font-semibold text-[var(--theme-text)]">{template.name}</span>
                   {template.is_default && <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-[var(--theme-primary)]">Default</span>}
-                  <span className="ml-2 text-xs uppercase tracking-[0.12em]">{template.category}</span>
                   <span className="mt-1 block text-xs">{template.description}</span>
                 </button>
                 {selectedTemplate?.id === template.id && (
@@ -1315,9 +1362,12 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
         >
           <div className="grid gap-2 sm:grid-cols-2">
             {([
+              ["terminology", "District Terminology"],
               ["school_year", "Default School Year"],
               ["export", "Export Defaults"],
+              ["packet_versions", "Packet Audiences"],
               ["packet_pages", "Default Packet Pages"],
+              ["accommodations", "Accommodations Settings"],
               ["observation_checklist", "Observation Checklist"],
               ["data_sheet_templates", "Data Sheet Templates"],
               ["service_presets", "Service Area Presets"],
@@ -1355,10 +1405,6 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                   <TextInput className="mt-2" value={templateDraft.name} onChange={(event) => updateTemplateDraft({ ...templateDraft, name: event.target.value })} />
                 </label>
                 <label className="block text-sm font-semibold text-[var(--theme-text)]">
-                  Category
-                  <TextInput className="mt-2" value={templateDraft.category} onChange={(event) => updateTemplateDraft({ ...templateDraft, category: event.target.value })} />
-                </label>
-                <label className="block text-sm font-semibold text-[var(--theme-text)]">
                   Description
                   <TextInput className="mt-2" value={templateDraft.description} onChange={(event) => updateTemplateDraft({ ...templateDraft, description: event.target.value })} />
                 </label>
@@ -1383,7 +1429,16 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                   </select>
                 </label>
 
-                <div className="rounded-xl border border-[var(--theme-border)] bg-[var(--theme-surface-muted)] p-3">
+                <Button
+                  className="w-full justify-center"
+                  variant="outline"
+                  onClick={() => setPaletteEditorOpen((current) => !current)}
+                >
+                  {paletteEditorOpen ? "Close Palette Editor" : "Edit Color Palette"}
+                </Button>
+
+                {paletteEditorOpen && <>
+                  <div className="rounded-xl border border-[var(--theme-border)] bg-[var(--theme-surface-muted)] p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-[var(--theme-text)]">Palette Details</p>
@@ -1415,9 +1470,9 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                       Add New Palette
                     </Button>
                   </div>
-                </div>
+                  </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-3">
                   {([
                     ["primary_color", "Primary"],
                     ["secondary_color", "Secondary"],
@@ -1435,14 +1490,14 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                         onChange={(event) => {
                           const customization = { ...templateDraft.customization, [key]: event.target.value };
                           updateTemplateDraft({ ...templateDraft, customization });
-                          setPaletteDraft({ ...paletteDraft, customization });
+                          setPaletteDraft((current) => ({ ...current, customization }));
                         }}
                       />
                     </label>
                   ))}
-                </div>
+                  </div>
 
-                <div className="rounded-xl border border-[var(--theme-border)] bg-white p-3">
+                  <div className="rounded-xl border border-[var(--theme-border)] bg-white p-3">
                   <p className="text-sm font-semibold text-[var(--theme-text)]">Service Area Icon Colors</p>
                   <p className="mt-1 text-xs text-[var(--theme-text-muted)]">
                     Used on goal summary, service information, and data collection pages. Cover icons keep the template cover styling.
@@ -1467,7 +1522,8 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                         </div>
                     ))}
                   </div>
-                </div>
+                  </div>
+                </>}
               </div>
 
               <TemplatePdfPreview
@@ -1564,7 +1620,6 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                       type="button"
                     >
                       <span className="block font-semibold text-[var(--theme-text)]">{template.name}</span>
-                      <span className="mt-1 block text-xs uppercase tracking-[0.12em] text-[var(--theme-text-muted)]">{template.category}</span>
                       <span className="mt-1 block text-xs text-[var(--theme-text-muted)]">{template.description}</span>
                     </button>
                   ))}
@@ -1594,9 +1649,12 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
               <div>
                 <h2 className="text-2xl font-semibold text-[var(--theme-primary)]">
                   {{
+                    terminology: "District Terminology",
                     school_year: "Default School Year",
                     export: "Export Defaults",
+                    packet_versions: "Packet Audiences",
                     packet_pages: "Default Packet Pages",
+                    accommodations: "Accommodations Settings",
                     observation_checklist: "Default Observation Checklist",
                     data_sheet_templates: "Data Sheet Templates",
                     service_presets: "Service Area Presets",
@@ -1611,6 +1669,17 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
             </div>
 
             <div className="mt-5 space-y-4">
+              {settingsModal === "terminology" && (
+                <fieldset className="grid gap-3">
+                  <legend className="text-sm font-semibold text-[var(--theme-text)]">Which abbreviation does the district use?</legend>
+                  {(Object.entries(terminologyOptions) as [NonNullable<AppSettings["terminology_preference"]>, (typeof terminologyOptions)[NonNullable<AppSettings["terminology_preference"]>]][]).map(([key, option]) => (
+                    <label key={key} className="flex cursor-pointer items-center gap-3 rounded-xl border border-[var(--theme-border)] p-3">
+                      <input type="radio" name="settings-terminology" checked={(appSettings.terminology_preference ?? "sped") === key} onChange={() => setAppSettings({ ...appSettings, terminology_preference: key })} />
+                      <span><strong>{option.acronym}</strong> - {option.fullTitle}</span>
+                    </label>
+                  ))}
+                </fieldset>
+              )}
               {settingsModal === "school_year" && (
                 <label className="block text-sm font-semibold text-[var(--theme-text)]">
                   School year
@@ -1657,18 +1726,30 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                       })}
                     />
                   </label>
-                  <label className="text-sm font-semibold text-[var(--theme-text)] md:col-span-2">
+                  <div className="text-sm font-semibold text-[var(--theme-text)] md:col-span-2">
                     Default export folder
-                    <TextInput
-                      className="mt-2"
-                      placeholder="C:\\Users\\Ryan\\Documents\\Packets"
-                      value={appSettings.default_export_settings.last_export_location}
-                      onChange={(event) => setAppSettings({
-                        ...appSettings,
-                        default_export_settings: { ...appSettings.default_export_settings, last_export_location: event.target.value },
-                      })}
-                    />
-                  </label>
+                    <div className="mt-2 rounded-xl border border-[var(--theme-border)] bg-white p-3">
+                      <p className="break-all text-xs font-medium text-[var(--theme-text-muted)]">
+                        {appSettings.default_export_settings.last_export_location || "No default folder selected."}
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button variant="outline" onClick={() => void chooseDefaultExportFolder()}>
+                          Save to...
+                        </Button>
+                        {appSettings.default_export_settings.last_export_location && (
+                          <Button
+                            variant="text"
+                            onClick={() => setAppSettings({
+                              ...appSettings,
+                              default_export_settings: { ...appSettings.default_export_settings, last_export_location: "" },
+                            })}
+                          >
+                            Clear
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                   <label className="text-sm font-semibold text-[var(--theme-text)]">
                     Export mode
                     <select
@@ -1727,6 +1808,59 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                 </div>
               )}
 
+              {settingsModal === "packet_versions" && (
+                <div className="space-y-3">
+                  <p className="text-sm leading-6 text-[var(--theme-text-muted)]">
+                    These are the reusable packet audiences/versions available in Student Setup. Select the ones needed for a project there, then customize each selected packet in Packet Designer.
+                  </p>
+                  {appSettings.packet_versions.map((version, index) => (
+                    <div key={version.audience || `packet-version-${index}`} className="grid gap-3 rounded-xl border border-[var(--theme-border)] bg-white p-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                      <label className="text-sm font-semibold text-[var(--theme-text)]">
+                        Audience / version name
+                        <TextInput
+                          className="mt-2"
+                          value={version.name}
+                          onChange={(event) => {
+                            const packetVersions = [...appSettings.packet_versions];
+                            packetVersions[index] = {
+                              ...version,
+                              name: event.target.value,
+                              audience: version.audience || event.target.value,
+                            };
+                            setAppSettings({ ...appSettings, packet_versions: packetVersions });
+                          }}
+                        />
+                      </label>
+                      <Button
+                        variant="text"
+                        disabled={appSettings.packet_versions.length <= 1}
+                        onClick={() => setAppSettings({
+                          ...appSettings,
+                          packet_versions: appSettings.packet_versions.filter((_, versionIndex) => versionIndex !== index),
+                        })}
+                      >
+                        Delete
+                      </Button>
+                      <p className="text-xs text-[var(--theme-text-muted)] sm:col-span-2">
+                        Existing projects keep their selected packet until you uncheck it in Student Setup.
+                      </p>
+                    </div>
+                  ))}
+                  <Button
+                    variant="outline"
+                    onClick={() => setAppSettings({
+                      ...appSettings,
+                      packet_versions: [
+                        ...appSettings.packet_versions,
+                        { id: null, name: "Coach Packet", audience: "coach_packet" },
+                      ],
+                    })}
+                  >
+                    Add Packet Audience
+                  </Button>
+                </div>
+              )}
+
               {settingsModal === "observation_checklist" && (
                 <div className="space-y-2">
                   {appSettings.default_observation_checklist.map((item, index) => (
@@ -1751,6 +1885,117 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                     </div>
                   ))}
                   <Button variant="outline" onClick={() => setAppSettings({ ...appSettings, default_observation_checklist: [...appSettings.default_observation_checklist, ""] })}>Add Item</Button>
+                </div>
+              )}
+
+              {settingsModal === "accommodations" && (
+                <div className="space-y-4">
+                  <section className="rounded-2xl border border-[var(--theme-border)] bg-white p-4">
+                    <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--theme-accent)]">
+                      Teacher responsibilities
+                    </h3>
+                    <div className="mt-4 space-y-4">
+                      <label className="flex items-start gap-3 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-surface)] p-4 text-sm font-semibold text-[var(--theme-text)]">
+                        <input
+                          checked={appSettings.accommodations_teacher_note_enabled}
+                          className="mt-1"
+                          type="checkbox"
+                          onChange={(event) => setAppSettings({
+                            ...appSettings,
+                            accommodations_teacher_note_enabled: event.target.checked,
+                          })}
+                        />
+                        <span>
+                          Include teacher responsibility note
+                          <span className="mt-1 block text-xs font-medium text-[var(--theme-text-muted)]">
+                            When enabled, this note appears on accommodations pages before the accommodation sections.
+                          </span>
+                        </span>
+                      </label>
+                      <label className="block text-sm font-semibold text-[var(--theme-text)]">
+                        Note title
+                        <TextInput
+                          className="mt-2"
+                          value={appSettings.accommodations_teacher_note_title}
+                          onChange={(event) => setAppSettings({
+                            ...appSettings,
+                            accommodations_teacher_note_title: event.target.value,
+                          })}
+                        />
+                      </label>
+                      <label className="block text-sm font-semibold text-[var(--theme-text)]">
+                        Note to teachers
+                        <textarea
+                          className="mt-2 min-h-36 w-full rounded-xl border border-[var(--theme-border)] bg-white px-3.5 py-2.5 text-sm leading-6 shadow-sm outline-none transition focus:border-[var(--theme-primary)] focus:ring-4 focus:ring-[var(--theme-primary-soft)]"
+                          value={appSettings.accommodations_teacher_note}
+                          onChange={(event) => setAppSettings({
+                            ...appSettings,
+                            accommodations_teacher_note: event.target.value,
+                          })}
+                        />
+                      </label>
+                    </div>
+                  </section>
+                  <section className="rounded-2xl border border-[var(--theme-border)] bg-white p-4">
+                    <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--theme-accent)]">
+                      Signature page setup
+                    </h3>
+                    <div className="mt-4 space-y-4">
+                      <label className="flex items-start gap-3 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-surface)] p-4 text-sm font-semibold text-[var(--theme-text)]">
+                        <input
+                          checked={appSettings.accommodations_signature_page_enabled}
+                          className="mt-1"
+                          type="checkbox"
+                          onChange={(event) => setAppSettings({
+                            ...appSettings,
+                            accommodations_signature_page_enabled: event.target.checked,
+                          })}
+                        />
+                        <span>
+                          Include accommodations signature page
+                          <span className="mt-1 block text-xs font-medium text-[var(--theme-text-muted)]">
+                            Adds a signature sheet after accommodations when accommodations are present.
+                          </span>
+                        </span>
+                      </label>
+                      <label className="block text-sm font-semibold text-[var(--theme-text)]">
+                        Signature page title
+                        <TextInput
+                          className="mt-2"
+                          value={appSettings.accommodations_signature_page_title}
+                          onChange={(event) => setAppSettings({
+                            ...appSettings,
+                            accommodations_signature_page_title: event.target.value,
+                          })}
+                        />
+                      </label>
+                      <label className="block text-sm font-semibold text-[var(--theme-text)]">
+                        Signature page note
+                        <textarea
+                          className="mt-2 min-h-28 w-full rounded-xl border border-[var(--theme-border)] bg-white px-3.5 py-2.5 text-sm leading-6 shadow-sm outline-none transition focus:border-[var(--theme-primary)] focus:ring-4 focus:ring-[var(--theme-primary-soft)]"
+                          value={appSettings.accommodations_signature_page_note}
+                          onChange={(event) => setAppSettings({
+                            ...appSettings,
+                            accommodations_signature_page_note: event.target.value,
+                          })}
+                        />
+                      </label>
+                      <label className="block text-sm font-semibold text-[var(--theme-text)]">
+                        Signature line layout
+                        <select
+                          className="mt-2 w-full rounded-xl border border-[var(--theme-border)] bg-white px-3.5 py-2.5 text-sm shadow-sm outline-none transition focus:border-[var(--theme-primary)] focus:ring-4 focus:ring-[var(--theme-primary-soft)]"
+                          value={appSettings.accommodations_signature_line_layout}
+                          onChange={(event) => setAppSettings({
+                            ...appSettings,
+                            accommodations_signature_line_layout: event.target.value as AppSettings["accommodations_signature_line_layout"],
+                          })}
+                        >
+                          <option value="teacher_coach_date">Staff Member + Date</option>
+                          <option value="staff_position_date">Staff Member + Position + Date</option>
+                        </select>
+                      </label>
+                    </div>
+                  </section>
                 </div>
               )}
 
@@ -1987,7 +2232,7 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
               {settingsModal === "service_presets" && (
                 <div className="space-y-3">
                   {appSettings.service_area_presets.map((area, index) => (
-                    <div key={area.id ?? index} className="grid gap-2 rounded-xl border border-[var(--theme-border)] bg-white p-3 md:grid-cols-2">
+                    <div key={area.id ?? index} className="grid gap-2 rounded-xl border border-[var(--theme-border)] bg-white p-3 md:grid-cols-3">
                       <TextInput placeholder="Service area" value={area.name} onChange={(event) => {
                         const serviceAreas = [...appSettings.service_area_presets];
                         serviceAreas[index] = { ...area, name: event.target.value };
@@ -2003,21 +2248,6 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                         serviceAreas[index] = { ...area, minutes_per_week: event.target.value ? Number(event.target.value) : null };
                         setAppSettings({ ...appSettings, service_area_presets: serviceAreas });
                       }} />
-                      <select
-                        className="rounded-xl border border-[var(--theme-border)] bg-white px-3.5 py-2.5 text-sm"
-                        value={area.delivery_model ?? ""}
-                        onChange={(event) => {
-                          const serviceAreas = [...appSettings.service_area_presets];
-                          serviceAreas[index] = { ...area, delivery_model: event.target.value ? event.target.value as typeof area.delivery_model : null };
-                          setAppSettings({ ...appSettings, service_area_presets: serviceAreas });
-                        }}
-                      >
-                        <option value="">Delivery model</option>
-                        <option value="push_in">Push in</option>
-                        <option value="pull_out">Pull out</option>
-                        <option value="combined">Combined</option>
-                        <option value="other">Other</option>
-                      </select>
                       <Button
                         variant="text"
                         onClick={() => setAppSettings({
@@ -2037,7 +2267,7 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                         ...appSettings,
                         service_area_presets: [
                           ...appSettings.service_area_presets,
-                          { id: null, name: "", setting: "Special Education", minutes_per_week: null, delivery_model: null, notes: "", position },
+                          { id: null, name: "", setting: "Special Education", minutes_per_week: null, notes: "", position },
                         ],
                       });
                     }}
@@ -2137,13 +2367,13 @@ export function DashboardPage({ notice, onOpen }: DashboardPageProps) {
                   <label className="text-sm font-semibold text-[var(--theme-text)] md:col-span-2">Footer Text<TextInput className="mt-2" value={brandKitDraft.footer_text} onChange={(event) => setBrandKitDraft({ ...brandKitDraft, footer_text: event.target.value })} /></label>
                   <label className="text-sm font-semibold text-[var(--theme-text)]">
                     Cover logo
-                    <input accept="image/png,image/jpeg,image/svg+xml" className="mt-2 block w-full text-sm text-[var(--theme-text-muted)] file:mr-3 file:rounded-lg file:border-0 file:bg-[var(--theme-primary)] file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white" disabled={!selectedBrandKit} type="file" onChange={(event) => void uploadSelectedBrandKitLogo(event.target.files?.[0] ?? null, "cover")} />
+                    <input accept="image/png,image/jpeg,image/svg+xml" className="mt-2 block w-full text-sm text-[var(--theme-text-muted)] file:mr-3 file:rounded-lg file:border-0 file:bg-[var(--theme-primary)] file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white" type="file" onChange={(event) => void uploadSelectedBrandKitLogo(event.target.files?.[0] ?? null, "cover")} />
                     {brandKitDraft.logo_filename && <span className="mt-2 block text-xs text-[var(--theme-primary)]">Current cover logo: {brandKitDraft.logo_filename}</span>}
-                    {!selectedBrandKit && <span className="mt-2 block text-xs text-[var(--theme-text-muted)]">Save the Brand Kit before uploading a logo.</span>}
+                    {!selectedBrandKit && <span className="mt-2 block text-xs text-[var(--theme-text-muted)]">Uploading will save this Brand Kit first.</span>}
                   </label>
                   <label className="text-sm font-semibold text-[var(--theme-text)]">
                     Watermark logo
-                    <input accept="image/png,image/jpeg,image/svg+xml" className="mt-2 block w-full text-sm text-[var(--theme-text-muted)] file:mr-3 file:rounded-lg file:border-0 file:bg-[var(--theme-primary)] file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white" disabled={!selectedBrandKit} type="file" onChange={(event) => void uploadSelectedBrandKitLogo(event.target.files?.[0] ?? null, "watermark")} />
+                    <input accept="image/png,image/jpeg,image/svg+xml" className="mt-2 block w-full text-sm text-[var(--theme-text-muted)] file:mr-3 file:rounded-lg file:border-0 file:bg-[var(--theme-primary)] file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white" type="file" onChange={(event) => void uploadSelectedBrandKitLogo(event.target.files?.[0] ?? null, "watermark")} />
                     {brandKitDraft.watermark_logo_filename && <span className="mt-2 block text-xs text-[var(--theme-primary)]">Current watermark logo: {brandKitDraft.watermark_logo_filename}</span>}
                   </label>
                   <label className="flex items-center gap-2 rounded-xl border border-[var(--theme-border)] bg-white px-3.5 py-2.5 text-sm font-semibold text-[var(--theme-text)] md:col-span-2">

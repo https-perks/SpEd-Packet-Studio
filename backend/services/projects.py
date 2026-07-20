@@ -20,6 +20,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.config import settings
+from backend.paths import paths
 from backend.generators.pdf import PdfRenderRequest, render_pdf
 from backend.models import AtAGlance, DataSheet, Export, Goal, PacketVersion, Project, ServiceArea, Student
 from backend.schemas.projects import (
@@ -55,6 +56,7 @@ from backend.schemas.projects import (
     PacketTemplateLibraryItem,
     PacketTemplateOption,
     TemplatePreviewRequest,
+    PacketVersionDraft,
     PacketVersionResponse,
     PacketVersionConfig,
     AssetPlacementDraft,
@@ -83,6 +85,11 @@ AUDIENCE_LABELS = {
     "substitute": "Substitute",
 }
 
+DEFAULT_PACKET_VERSION_OPTIONS = [
+    PacketVersionDraft(id=None, name=label, audience=audience)
+    for audience, label in AUDIENCE_LABELS.items()
+]
+
 DEFAULT_DATA_SHEET_COLUMNS = [
     {"id": "date", "title": "Date", "column_type": "date", "position": 0},
     {"id": "trial", "title": "Trial", "column_type": "text", "position": 1},
@@ -94,6 +101,7 @@ DEFAULT_PACKET_PAGES = [
     {"id": "cover", "title": "Cover Page", "page_type": "cover"},
     {"id": "at_a_glance", "title": "At-a-Glance", "page_type": "at_a_glance"},
     {"id": "accommodations", "title": "Accommodations/Modifications", "page_type": "placeholder"},
+    {"id": "accommodations_signature", "title": "Accommodations Signature Page", "page_type": "placeholder"},
     {"id": "behavior", "title": "Behavior Plans", "page_type": "placeholder"},
     {"id": "goal_summary", "title": "Goal Summary", "page_type": "goal_summary"},
     {"id": "services", "title": "Service Areas", "page_type": "services"},
@@ -113,6 +121,18 @@ DEFAULT_OBSERVATION_CHECKLIST = [
     "Concerns from parents",
     "Other observations",
 ]
+
+DEFAULT_ACCOMMODATIONS_TEACHER_NOTE = (
+    "In order to help this student be successful, you need to be informed of your "
+    "specific responsibilities related to this student and the accommodations, "
+    "modifications and supports that must be provided for this student. If you have "
+    "any questions or need further information, please talk to the case manager."
+)
+
+DEFAULT_ACCOMMODATIONS_SIGNATURE_NOTE = (
+    "The following staff have been informed of their specific responsibilities related "
+    "to this student and the accommodations, modifications and supports that must be provided."
+)
 
 DEFAULT_SERVICE_AREA_PRESETS = [
     ServiceAreaDraft(name="Reading", position=0),
@@ -188,6 +208,48 @@ THEME_OPTIONS = [
         description="Custom district branding palette with editable primary, secondary, and accent colors.",
         category="District",
     ),
+    ThemeOption(
+        id="field_notes",
+        name="Field Notes",
+        description="Forest green, warm copper, and paper-inspired neutrals.",
+        category="Template",
+    ),
+    ThemeOption(
+        id="editorial_ledger",
+        name="Editorial Ledger",
+        description="Ink blue, editorial brown, and restrained antique gold.",
+        category="Template",
+    ),
+    ThemeOption(
+        id="modular_blocks",
+        name="Modular Blocks",
+        description="Deep navy, geometric teal, and energetic orange.",
+        category="Template",
+    ),
+    ThemeOption(
+        id="alpine_photo",
+        name="Alpine Photo",
+        description="Alpine navy, dusk blue, and glacial cyan.",
+        category="Template",
+    ),
+    ThemeOption(
+        id="mid_century_classroom",
+        name="Mid-Century Classroom",
+        description="Teal, ochre, brick, and warm classroom-paper neutrals.",
+        category="Template",
+    ),
+    ThemeOption(
+        id="typographic_poster",
+        name="Typographic",
+        description="Poster-style navy type, clay accent, and refined editorial neutrals.",
+        category="Template",
+    ),
+    ThemeOption(
+        id="signal_atlas",
+        name="Signal",
+        description="Dramatic signal navy, technical teal, and high-contrast orange.",
+        category="Template",
+    ),
 ]
 
 THEME_TOKENS = {
@@ -247,6 +309,98 @@ THEME_TOKENS = {
         "soft": "#ffffff",
         "border": "#c9d6e4",
         "text": "#14233c",
+    },
+    "field_notes": {
+        "primary": "#274c3b",
+        "accent": "#b86b3c",
+        "blue": "#3f6f61",
+        "teal": "#4f8070",
+        "green": "#6f8f58",
+        "purple": "#6f5a7f",
+        "orange": "#d7b56d",
+        "soft": "#f4f0e6",
+        "card": "#fffdf8",
+        "border": "#d8c9a8",
+        "text": "#24322b",
+    },
+    "editorial_ledger": {
+        "primary": "#26364a",
+        "accent": "#8a5a44",
+        "blue": "#3f5f7d",
+        "teal": "#557a78",
+        "green": "#66785c",
+        "purple": "#6f607b",
+        "orange": "#c3a354",
+        "soft": "#f2efe9",
+        "card": "#fffdf9",
+        "border": "#d4cec4",
+        "text": "#25282d",
+    },
+    "modular_blocks": {
+        "primary": "#17345f",
+        "accent": "#00a6a6",
+        "blue": "#2563eb",
+        "teal": "#00a6a6",
+        "green": "#22a06b",
+        "purple": "#7654a6",
+        "orange": "#e56b2f",
+        "soft": "#eef2f5",
+        "card": "#ffffff",
+        "border": "#b9c5d1",
+        "text": "#17212b",
+    },
+    "alpine_photo": {
+        "primary": "#17345f",
+        "accent": "#3d759d",
+        "blue": "#2d6f9f",
+        "teal": "#2bb5c4",
+        "green": "#4f8f73",
+        "purple": "#665f91",
+        "orange": "#2bb5c4",
+        "soft": "#eaf1f6",
+        "card": "#ffffff",
+        "border": "#b8d8ee",
+        "text": "#14233c",
+    },
+    "mid_century_classroom": {
+        "primary": "#235c64",
+        "accent": "#b6583f",
+        "blue": "#235c64",
+        "teal": "#235c64",
+        "green": "#6f8f58",
+        "purple": "#6f5a7f",
+        "orange": "#e3b23c",
+        "orange_soft": "#fbf0d0",
+        "soft": "#f3ead7",
+        "card": "#fffdf7",
+        "border": "#262626",
+        "text": "#262626",
+    },
+    "typographic_poster": {
+        "primary": "#14233c",
+        "accent": "#5b7f78",
+        "blue": "#14233c",
+        "teal": "#5b7f78",
+        "green": "#5f7f70",
+        "purple": "#5d5a78",
+        "orange": "#d5633c",
+        "soft": "#f3f0e8",
+        "card": "#ffffff",
+        "border": "#14233c",
+        "text": "#1e2430",
+    },
+    "signal_atlas": {
+        "primary": "#102a43",
+        "accent": "#00a6a6",
+        "blue": "#102a43",
+        "teal": "#00a6a6",
+        "green": "#2f8f7a",
+        "purple": "#52627a",
+        "orange": "#ff8a3d",
+        "soft": "#eef3f5",
+        "card": "#ffffff",
+        "border": "#b8c7d0",
+        "text": "#17212b",
     },
     "elementary": {
         "primary": "#24577a",
@@ -350,85 +504,133 @@ PACKET_TEMPLATE_OPTIONS = [
     PacketTemplateOption(
         id="modern_professional",
         name="Modern Professional",
-        description="Clean geometric cover, minimal accents, and strong readability.",
-        category="Secondary",
-        cover_style="Large title with simple service badges",
-        best_for="Middle and high school packets",
+        description="Clean layout with geometric accents.",
         page_count_hint="Standard",
     ),
     PacketTemplateOption(
         id="district_branding",
         name="District Branding",
-        description="Adds school and district brand-kit text to the cover and footer.",
-        category="District",
-        cover_style="Logo-ready cover with prominent school identity",
-        best_for="District-standard packets",
+        description="Logo-forward layout for district packets.",
         page_count_hint="Standard",
-    ),
-    PacketTemplateOption(
-        id="mountain_illustrated",
-        name="Mountain Illustrated",
-        description="Layered mountain landscape, strong teal ribbon, and centered service badges.",
-        category="Illustrated",
-        cover_style="Light illustrated cover with mountain horizon",
-        best_for="Warm professional packets with visual personality",
-        page_count_hint="Standard",
-    ),
-    PacketTemplateOption(
-        id="elementary_pop",
-        name="Elementary Pop",
-        description="Bright playful type, soft confetti accents, and large approachable badges.",
-        category="Elementary",
-        cover_style="Colorful friendly cover with large service blocks",
-        best_for="Elementary teams and approachable staff packets",
-        page_count_hint="Expanded",
     ),
     PacketTemplateOption(
         id="alpine_photo",
         name="Alpine Photo",
-        description="Dark geometric frame with a high-contrast alpine-inspired image panel.",
-        category="Secondary",
-        cover_style="Dark angled cover with image-style panel",
-        best_for="Middle and high school packets with a bold cover",
+        description="Dark cover with mountain-inspired shapes.",
         page_count_hint="Standard",
     ),
     PacketTemplateOption(
-        id="botanical_frame",
-        name="Botanical Frame",
-        description="Elegant green frame, calm typography, and soft botanical accents.",
-        category="Classic",
-        cover_style="Centered serif cover with leafy border",
-        best_for="Polished parent and team copies",
+        id="field_notes",
+        name="Field Notes",
+        description="Notebook style with warm paper colors.",
         page_count_hint="Standard",
     ),
     PacketTemplateOption(
-        id="chalkboard",
-        name="Chalkboard",
-        description="High-contrast chalkboard style with handwritten-inspired dividers.",
-        category="Creative",
-        cover_style="Dark chalkboard cover with sketched section marks",
-        best_for="Casual internal packets and teacher-facing copies",
+        id="editorial_ledger",
+        name="Editorial Ledger",
+        description="Editorial layout with ruled sections.",
         page_count_hint="Standard",
     ),
     PacketTemplateOption(
-        id="soft_organic",
-        name="Soft Organic",
-        description="Cream background, rounded cards, warm neutrals, and subtle organic shapes.",
-        category="Friendly",
-        cover_style="Soft neutral cover with rounded service cards",
-        best_for="Elementary and team collaboration packets",
+        id="modular_blocks",
+        name="Modular Blocks",
+        description="Block-based layout with strong contrast.",
         page_count_hint="Standard",
     ),
     PacketTemplateOption(
-        id="purple_dot",
-        name="Purple Dot",
-        description="Clean editorial layout with a dotted accent field and purple section system.",
-        category="Modern",
-        cover_style="White cover with purple dot field and footer band",
-        best_for="Speech, related services, and concise digital packets",
-        page_count_hint="Compact",
+        id="mid_century_classroom",
+        name="Mid-Century Classroom",
+        description="Retro classroom layout with warm shapes.",
+        page_count_hint="Standard",
+    ),
+    PacketTemplateOption(
+        id="typographic_poster",
+        name="Typographic",
+        description="Type-focused cover with bold spacing.",
+        page_count_hint="Standard",
+    ),
+    PacketTemplateOption(
+        id="signal_atlas",
+        name="Signal",
+        description="Dark technical cover with clean interior pages.",
+        page_count_hint="Standard",
     ),
 ]
+
+
+FIELD_NOTES_CUSTOMIZATION = ThemeCustomization(
+    primary_color="#274c3b",
+    secondary_color="#b86b3c",
+    accent_color="#d7b56d",
+    background_color="#f4f0e6",
+    card_color="#fffdf8",
+    text_color="#24322b",
+)
+
+EDITORIAL_LEDGER_CUSTOMIZATION = ThemeCustomization(
+    primary_color="#26364a",
+    secondary_color="#8a5a44",
+    accent_color="#c3a354",
+    background_color="#f2efe9",
+    card_color="#fffdf9",
+    text_color="#25282d",
+)
+
+MODULAR_BLOCKS_CUSTOMIZATION = ThemeCustomization(
+    primary_color="#17345f",
+    secondary_color="#00a6a6",
+    accent_color="#e56b2f",
+    background_color="#eef2f5",
+    card_color="#ffffff",
+    text_color="#17212b",
+)
+
+ALPINE_PHOTO_CUSTOMIZATION = ThemeCustomization(
+    primary_color="#17345f",
+    secondary_color="#3d759d",
+    accent_color="#2bb5c4",
+    background_color="#eaf1f6",
+    card_color="#ffffff",
+    text_color="#14233c",
+)
+
+MID_CENTURY_CLASSROOM_CUSTOMIZATION = ThemeCustomization(
+    primary_color="#235c64",
+    secondary_color="#b6583f",
+    accent_color="#e3b23c",
+    background_color="#f3ead7",
+    card_color="#fffdf7",
+    text_color="#262626",
+)
+
+TYPOGRAPHIC_POSTER_CUSTOMIZATION = ThemeCustomization(
+    primary_color="#14233c",
+    secondary_color="#5b7f78",
+    accent_color="#d5633c",
+    background_color="#f3f0e8",
+    card_color="#ffffff",
+    text_color="#1e2430",
+)
+
+SIGNAL_ATLAS_CUSTOMIZATION = ThemeCustomization(
+    primary_color="#102a43",
+    secondary_color="#00a6a6",
+    accent_color="#ff8a3d",
+    background_color="#eef3f5",
+    card_color="#ffffff",
+    text_color="#17212b",
+)
+
+TEMPLATE_DEFAULT_THEME_IDS = {
+    "alpine_photo": "alpine_photo",
+    "district_branding": "district_colors",
+    "field_notes": "field_notes",
+    "editorial_ledger": "editorial_ledger",
+    "modular_blocks": "modular_blocks",
+    "mid_century_classroom": "mid_century_classroom",
+    "typographic_poster": "typographic_poster",
+    "signal_atlas": "signal_atlas",
+}
 
 
 def _project_query():
@@ -519,12 +721,6 @@ def _unique_output_path(directory: Path, filename: str) -> Path:
         index += 1
 
 
-def _delivery_label(value: str | None) -> str:
-    if not value:
-        return "Not selected"
-    return " ".join(part.capitalize() for part in value.split("_"))
-
-
 def _format_date(value: date | None) -> str:
     return value.isoformat() if value else "Not entered"
 
@@ -551,7 +747,7 @@ def list_themes() -> list[ThemeOption]:
 
 
 def _library_file(name: str) -> Path:
-    path = settings.data_dir / "library"
+    path = paths.templates_dir if name == "templates.json" else paths.settings_dir
     path.mkdir(parents=True, exist_ok=True)
     return path / name
 
@@ -579,8 +775,16 @@ def _app_settings_default() -> AppSettings:
         default_theme_id="teacher_friendly",
         default_packet_template_id="modern_professional",
         default_export_settings=ExportSettings(),
+        packet_versions=DEFAULT_PACKET_VERSION_OPTIONS,
         default_packet_pages=_default_packet_pages_from(DEFAULT_PACKET_PAGES),
         default_observation_checklist=DEFAULT_OBSERVATION_CHECKLIST,
+        accommodations_teacher_note_enabled=True,
+        accommodations_teacher_note_title="Teacher Responsibilities",
+        accommodations_teacher_note=DEFAULT_ACCOMMODATIONS_TEACHER_NOTE,
+        accommodations_signature_page_enabled=False,
+        accommodations_signature_page_title="Accommodations Signature Page",
+        accommodations_signature_page_note=DEFAULT_ACCOMMODATIONS_SIGNATURE_NOTE,
+        accommodations_signature_line_layout="teacher_coach_date",
         default_data_sheet_columns=DEFAULT_DATA_SHEET_COLUMN_DRAFTS,
         data_sheet_templates=DEFAULT_DATA_SHEET_TEMPLATES,
         service_area_presets=DEFAULT_SERVICE_AREA_PRESETS,
@@ -600,6 +804,31 @@ def _default_packet_pages_from(pages: list[dict[str, str]]) -> list[PacketPageDr
     ]
 
 
+def _merge_default_packet_pages(
+    pages: list[PacketPageDraft],
+    default_pages: list[PacketPageDraft] | None = None,
+) -> list[PacketPageDraft]:
+    merged = [page.model_copy(deep=True) for page in pages]
+    existing_ids = {page.id for page in merged}
+    defaults = default_pages or _default_packet_pages_from(DEFAULT_PACKET_PAGES)
+    default_order = [page.id for page in defaults]
+    for default_page in defaults:
+        if default_page.id in existing_ids:
+            continue
+        previous_default_ids = default_order[: default_order.index(default_page.id)]
+        insert_at = len(merged)
+        for index in range(len(merged) - 1, -1, -1):
+            if merged[index].id in previous_default_ids:
+                insert_at = index + 1
+                break
+        merged.insert(insert_at, default_page)
+        existing_ids.add(default_page.id)
+    return [
+        page.model_copy(update={"position": position})
+        for position, page in enumerate(sorted(merged, key=lambda item: item.position))
+    ]
+
+
 def get_app_settings() -> AppSettings:
     raw = _read_library("app-settings.json")
     defaults = _app_settings_default()
@@ -611,8 +840,21 @@ def get_app_settings() -> AppSettings:
         return defaults
     if not loaded.default_packet_pages:
         loaded.default_packet_pages = defaults.default_packet_pages
+    else:
+        loaded.default_packet_pages = _merge_default_packet_pages(loaded.default_packet_pages)
     if not loaded.default_observation_checklist:
         loaded.default_observation_checklist = defaults.default_observation_checklist
+    if not loaded.packet_versions:
+        loaded.packet_versions = defaults.packet_versions
+    loaded.packet_versions = _normalize_packet_version_options(loaded.packet_versions)
+    if not loaded.accommodations_teacher_note:
+        loaded.accommodations_teacher_note = defaults.accommodations_teacher_note
+    if not loaded.accommodations_teacher_note_title:
+        loaded.accommodations_teacher_note_title = defaults.accommodations_teacher_note_title
+    if not loaded.accommodations_signature_page_title:
+        loaded.accommodations_signature_page_title = defaults.accommodations_signature_page_title
+    if not loaded.accommodations_signature_page_note:
+        loaded.accommodations_signature_page_note = defaults.accommodations_signature_page_note
     if not loaded.default_data_sheet_columns:
         loaded.default_data_sheet_columns = defaults.default_data_sheet_columns
     if not loaded.data_sheet_templates:
@@ -623,18 +865,62 @@ def get_app_settings() -> AppSettings:
     return loaded
 
 
+def _normalize_packet_version_options(
+    values: list[PacketVersionDraft],
+) -> list[PacketVersionDraft]:
+    normalized: list[PacketVersionDraft] = []
+    used_audiences: set[str] = set()
+    for index, value in enumerate(values):
+        name = value.name.strip()
+        if not name:
+            continue
+        base_audience = _audience_slug(value.audience or name, f"packet_{index + 1}")
+        audience = base_audience
+        suffix = 2
+        while audience in used_audiences:
+            audience = f"{base_audience}_{suffix}"
+            suffix += 1
+        used_audiences.add(audience)
+        normalized.append(
+            PacketVersionDraft(
+                id=value.id,
+                name=name,
+                audience=audience,
+            )
+        )
+    return normalized or [DEFAULT_PACKET_VERSION_OPTIONS[0]]
+
+
 def save_app_settings(value: AppSettings) -> AppSettings:
     normalized = value.model_copy(deep=True)
     normalized.default_theme_id = _resolve_theme_id(normalized.default_theme_id)
     if _template_library_item(normalized.default_packet_template_id) is None:
         normalized.default_packet_template_id = "modern_professional"
-    normalized.default_packet_pages = sorted(
-        normalized.default_packet_pages or _app_settings_default().default_packet_pages,
-        key=lambda page: page.position,
+    normalized.default_packet_pages = _merge_default_packet_pages(
+        normalized.default_packet_pages or _app_settings_default().default_packet_pages
     )
     normalized.default_observation_checklist = [
         item.strip() for item in normalized.default_observation_checklist if item.strip()
     ] or DEFAULT_OBSERVATION_CHECKLIST
+    normalized.packet_versions = _normalize_packet_version_options(
+        normalized.packet_versions or DEFAULT_PACKET_VERSION_OPTIONS
+    )
+    normalized.accommodations_teacher_note = (
+        normalized.accommodations_teacher_note.strip()
+        or DEFAULT_ACCOMMODATIONS_TEACHER_NOTE
+    )
+    normalized.accommodations_teacher_note_title = (
+        normalized.accommodations_teacher_note_title.strip()
+        or "Teacher Responsibilities"
+    )
+    normalized.accommodations_signature_page_title = (
+        normalized.accommodations_signature_page_title.strip()
+        or "Accommodations Signature Page"
+    )
+    normalized.accommodations_signature_page_note = (
+        normalized.accommodations_signature_page_note.strip()
+        or DEFAULT_ACCOMMODATIONS_SIGNATURE_NOTE
+    )
     normalized.default_data_sheet_columns = sorted(
         normalized.default_data_sheet_columns or DEFAULT_DATA_SHEET_COLUMN_DRAFTS,
         key=lambda column: column.position,
@@ -871,8 +1157,24 @@ def _builtin_template_library_items(include_hidden: bool = False) -> list[Packet
             or PacketTemplateLibraryItem(
                 **template.model_dump(),
                 base_template_id=template.id,
-                theme_id="teacher_friendly",
-                customization=_customization_from_tokens("teacher_friendly"),
+                theme_id=TEMPLATE_DEFAULT_THEME_IDS.get(template.id, "teacher_friendly"),
+                customization=(
+                    FIELD_NOTES_CUSTOMIZATION
+                    if template.id == "field_notes"
+                    else EDITORIAL_LEDGER_CUSTOMIZATION
+                    if template.id == "editorial_ledger"
+                    else MODULAR_BLOCKS_CUSTOMIZATION
+                    if template.id == "modular_blocks"
+                    else ALPINE_PHOTO_CUSTOMIZATION
+                    if template.id == "alpine_photo"
+                    else MID_CENTURY_CLASSROOM_CUSTOMIZATION
+                    if template.id == "mid_century_classroom"
+                    else TYPOGRAPHIC_POSTER_CUSTOMIZATION
+                    if template.id == "typographic_poster"
+                    else SIGNAL_ATLAS_CUSTOMIZATION
+                    if template.id == "signal_atlas"
+                    else _customization_from_tokens(TEMPLATE_DEFAULT_THEME_IDS.get(template.id, "teacher_friendly"))
+                ),
                 is_builtin=True,
                 is_default=template.id == default_id,
             )
@@ -901,7 +1203,13 @@ def _template_overrides() -> dict[str, PacketTemplateLibraryItem]:
         if not isinstance(item, dict) or template_id not in valid_base_ids:
             continue
         try:
-            parsed = PacketTemplateLibraryItem(**item)
+            parsed = PacketTemplateLibraryItem(
+                **{
+                    key: value
+                    for key, value in item.items()
+                    if key not in {"category", "cover_style", "best_for"}
+                }
+            )
         except ValueError:
             continue
         parsed.id = template_id
@@ -923,7 +1231,13 @@ def _custom_template_library_items() -> list[PacketTemplateLibraryItem]:
         if not isinstance(item, dict):
             continue
         try:
-            parsed = PacketTemplateLibraryItem(**item)
+            parsed = PacketTemplateLibraryItem(
+                **{
+                    key: value
+                    for key, value in item.items()
+                    if key not in {"category", "cover_style", "best_for"}
+                }
+            )
         except ValueError:
             continue
         if parsed.base_template_id not in valid_base_ids:
@@ -1003,9 +1317,6 @@ def list_packet_templates() -> list[PacketTemplateOption]:
             id=item.id,
             name=item.name,
             description=item.description,
-            category=item.category,
-            cover_style=item.cover_style,
-            best_for=item.best_for,
             page_count_hint=item.page_count_hint,
         )
         for item in list_template_library()
@@ -1025,7 +1336,19 @@ def _packet_template_base_id(template_id: str) -> str:
 
 def _customization_for_template(template_id: str) -> ThemeCustomization | None:
     item = _template_library_item(template_id)
-    if item and (not item.is_builtin or template_id in _template_overrides()):
+    if item and (
+        not item.is_builtin
+        or template_id in _template_overrides()
+        or template_id in {
+            "field_notes",
+            "editorial_ledger",
+            "modular_blocks",
+            "alpine_photo",
+            "mid_century_classroom",
+            "typographic_poster",
+            "signal_atlas",
+        }
+    ):
         return item.customization
     return None
 
@@ -1041,9 +1364,6 @@ def create_template_library_item(draft: PacketTemplateLibraryDraft) -> PacketTem
         id=f"custom_{uuid4().hex[:12]}",
         name=draft.name.strip() or "Custom Template",
         description=draft.description.strip() or "Custom packet template.",
-        category=draft.category.strip() or "Custom",
-        cover_style=base.cover_style,
-        best_for=base.best_for,
         page_count_hint=base.page_count_hint,
         base_template_id=draft.base_template_id,
         theme_id=draft.theme_id,
@@ -1069,9 +1389,6 @@ def update_template_library_item(template_id: str, draft: PacketTemplateLibraryD
             id=template_id,
             name=draft.name.strip() or base.name,
             description=draft.description.strip() or base.description,
-            category=draft.category.strip() or base.category,
-            cover_style=base.cover_style,
-            best_for=base.best_for,
             page_count_hint=base.page_count_hint,
             base_template_id=template_id,
             theme_id=draft.theme_id,
@@ -1091,9 +1408,6 @@ def update_template_library_item(template_id: str, draft: PacketTemplateLibraryD
         update={
             "name": draft.name.strip() or "Custom Template",
             "description": draft.description.strip() or "Custom packet template.",
-            "category": draft.category.strip() or "Custom",
-            "cover_style": base.cover_style,
-            "best_for": base.best_for,
             "page_count_hint": base.page_count_hint,
             "base_template_id": draft.base_template_id,
             "theme_id": draft.theme_id,
@@ -1341,20 +1655,20 @@ def upload_brand_kit_logo(upload: BrandKitLogoUpload) -> BrandKitLibraryItem:
     if index is None:
         raise HTTPException(status_code=404, detail="Brand Kit not found.")
     extension = allowed_types[content_type]
-    logo_dir = settings.data_dir / "assets" / "brand-kits" / upload.brand_kit_id
+    logo_dir = paths.brand_kits_dir / upload.brand_kit_id
     logo_dir.mkdir(parents=True, exist_ok=True)
     output_name = "watermark-logo" if upload.logo_kind == "watermark" else "cover-logo"
     output_path = logo_dir / f"{output_name}{extension}"
     output_path.write_bytes(data)
     update = (
         {
-            "watermark_logo_relative_path": output_path.relative_to(settings.data_dir).as_posix(),
+            "watermark_logo_relative_path": output_path.relative_to(paths.app_data_dir).as_posix(),
             "watermark_logo_filename": upload.filename,
             "watermark_enabled": True,
         }
         if upload.logo_kind == "watermark"
         else {
-            "logo_relative_path": output_path.relative_to(settings.data_dir).as_posix(),
+            "logo_relative_path": output_path.relative_to(paths.app_data_dir).as_posix(),
             "logo_filename": upload.filename,
         }
     )
@@ -1407,7 +1721,7 @@ def _customization_from_tokens(theme_id: str) -> ThemeCustomization:
         secondary_color=tokens["accent"],
         accent_color=tokens.get("orange", tokens["accent"]),
         background_color=tokens["soft"],
-        card_color="#ffffff",
+        card_color=tokens.get("card", "#ffffff"),
         text_color=tokens.get("text", "#12213a"),
         service_area_colors={
             **DEFAULT_SERVICE_AREA_COLORS,
@@ -1484,11 +1798,10 @@ def _packet_config(version: PacketVersion) -> PacketVersionConfig:
                         page_type=str(page.get("page_type") or page.get("id") or "custom"),
                         enabled=bool(page.get("enabled", True)),
                         position=int(page.get("position") or index),
+                        body_text=str(page.get("body_text") or ""),
                     )
                 )
-    existing_ids = {page.id for page in pages}
-    pages.extend(page for page in _default_packet_pages() if page.id not in existing_ids)
-    pages = sorted(pages, key=lambda item: item.position)
+    pages = _merge_default_packet_pages(pages, _default_packet_pages())
 
     raw_assets = settings_json.get("asset_placements")
     assets: list[AssetPlacementDraft] = []
@@ -1511,6 +1824,67 @@ def _packet_config(version: PacketVersion) -> PacketVersionConfig:
     )
 
 
+def _project_custom_pages(project: Project) -> list[PacketPageDraft]:
+    custom_pages: dict[str, PacketPageDraft] = {}
+    for version in sorted(project.packet_versions, key=lambda item: item.created_at):
+        if version.deleted_at is not None:
+            continue
+        for page in _packet_config(version).pages:
+            if page.page_type == "custom_text" and page.id not in custom_pages:
+                custom_pages[page.id] = page.model_copy(deep=True)
+    return list(custom_pages.values())
+
+
+def _merge_project_custom_pages(
+    config: PacketVersionConfig,
+    custom_pages: list[PacketPageDraft],
+) -> PacketVersionConfig:
+    existing_ids = {page.id for page in config.pages}
+    pages = [page.model_copy(deep=True) for page in config.pages]
+    for custom_page in custom_pages:
+        if custom_page.id in existing_ids:
+            continue
+        pages.append(
+            custom_page.model_copy(
+                update={
+                    "enabled": False,
+                    "position": len(pages),
+                }
+            )
+        )
+    return config.model_copy(
+        update={
+            "pages": [
+                page.model_copy(update={"position": position})
+                for position, page in enumerate(sorted(pages, key=lambda item: item.position))
+            ]
+        }
+    )
+
+
+def _packet_settings_with_project_custom_pages(project: Project) -> dict[str, object]:
+    settings_json = _new_packet_version_settings()
+    pages = [
+        PacketPageDraft(**page)
+        for page in settings_json["pages"]
+        if isinstance(page, dict)
+    ]
+    for custom_page in _project_custom_pages(project):
+        pages.append(
+            custom_page.model_copy(
+                update={
+                    "enabled": False,
+                    "position": len(pages),
+                }
+            )
+        )
+    settings_json["pages"] = [
+        page.model_dump(mode="json")
+        for page in pages
+    ]
+    return settings_json
+
+
 def _new_packet_version_settings() -> dict[str, object]:
     return {
         "pages": [
@@ -1522,8 +1896,9 @@ def _new_packet_version_settings() -> dict[str, object]:
 
 
 def _packet_builder_configs(project: Project) -> list[PacketVersionConfig]:
+    custom_pages = _project_custom_pages(project)
     return [
-        _packet_config(version)
+        _merge_project_custom_pages(_packet_config(version), custom_pages)
         for version in sorted(project.packet_versions, key=lambda item: item.created_at)
         if version.deleted_at is None
     ]
@@ -1808,7 +2183,6 @@ def _student_setup_from_model(project: Project) -> StudentSetupDraft:
                 "name": area.name,
                 "setting": area.setting or "",
                 "minutes_per_week": area.minutes,
-                "delivery_model": area.delivery_model,
                 "notes": area.notes or "",
                 "position": area.position,
             }
@@ -1818,9 +2192,11 @@ def _student_setup_from_model(project: Project) -> StudentSetupDraft:
         audiences=[
             version.audience
             for version in project.packet_versions
-            if version.audience in AUDIENCE_LABELS and version.deleted_at is None
+            if version.deleted_at is None
         ],
         accommodations=_accommodations_from_settings(settings_json.get("accommodations")),
+        accommodations_parent_strengths_enabled=bool(settings_json.get("accommodations_parent_strengths_enabled")),
+        accommodations_parent_strengths=str(settings_json.get("accommodations_parent_strengths") or ""),
         behavior_plan=_behavior_plan_text(behavior_sections, settings_json.get("behavior_plan")),
         behavior_plan_sections=behavior_sections,
         related_service_providers=_related_service_providers_from_settings(settings_json.get("related_service_providers")),
@@ -1921,6 +2297,8 @@ def _detail(project: Project) -> ProjectDetail:
         ],
         audiences=draft.audiences,
         accommodations=draft.accommodations,
+        accommodations_parent_strengths_enabled=draft.accommodations_parent_strengths_enabled,
+        accommodations_parent_strengths=draft.accommodations_parent_strengths,
         behavior_plan=draft.behavior_plan,
         behavior_plan_sections=draft.behavior_plan_sections,
         related_service_providers=draft.related_service_providers,
@@ -2112,6 +2490,11 @@ def save_student_setup(
         for position, item in enumerate(draft.accommodations)
         if item.text.strip()
     ]
+    settings_json["accommodations_parent_strengths_enabled"] = (
+        draft.accommodations_parent_strengths_enabled
+        and bool(draft.accommodations_parent_strengths.strip())
+    )
+    settings_json["accommodations_parent_strengths"] = draft.accommodations_parent_strengths.strip()
     behavior_sections = [
         item.model_copy(update={"position": position}).model_dump(mode="json")
         for position, item in enumerate(draft.behavior_plan_sections)
@@ -2151,10 +2534,15 @@ def save_student_setup(
         area.name = value.name.strip()
         area.setting = value.setting.strip() or None
         area.minutes = value.minutes_per_week
-        area.delivery_model = value.delivery_model
+        area.delivery_model = None
         area.notes = value.notes.strip() or None
         area.position = position
 
+    packet_version_options = {
+        option.audience: option.name
+        for option in get_app_settings().packet_versions
+        if option.audience and option.name.strip()
+    }
     current_versions = {
         version.audience: version
         for version in project.packet_versions
@@ -2162,17 +2550,22 @@ def save_student_setup(
     }
     selected = set(draft.audiences)
     for audience, version in current_versions.items():
-        if audience in AUDIENCE_LABELS and audience not in selected:
+        if audience not in selected:
             session.delete(version)
     for audience in selected:
         if audience not in current_versions:
             session.add(
                 PacketVersion(
                     project_id=project.id,
-                    name=AUDIENCE_LABELS[audience],
+                    name=packet_version_options.get(audience, audience.replace("_", " ").title()),
                     audience=audience,
-                    settings_json=_new_packet_version_settings(),
+                    settings_json=_packet_settings_with_project_custom_pages(project),
                 )
+            )
+        else:
+            current_versions[audience].name = packet_version_options.get(
+                audience,
+                current_versions[audience].name,
             )
 
     session.commit()
@@ -2338,13 +2731,13 @@ def upload_brand_logo(
 
     project = get_project(session, project_id)
     extension = allowed_types[content_type]
-    logo_dir = settings.data_dir / "assets" / project.id
+    logo_dir = paths.brand_kits_dir / "projects" / project.id
     logo_dir.mkdir(parents=True, exist_ok=True)
     output_path = logo_dir / f"brand-logo{extension}"
     output_path.write_bytes(data)
 
     brand = _brand_kit(project)
-    brand.logo_relative_path = output_path.relative_to(settings.data_dir).as_posix()
+    brand.logo_relative_path = output_path.relative_to(paths.app_data_dir).as_posix()
     brand.logo_filename = upload.filename
     project.settings_json = _settings_with(project, brand_kit=brand.model_dump())
     _touch(project)
@@ -2525,7 +2918,7 @@ def duplicate_project(
             name=area.name,
             minutes=area.minutes,
             setting=area.setting,
-            delivery_model=area.delivery_model,
+            delivery_model=None,
             notes=area.notes,
             position=area.position,
         )
@@ -2648,6 +3041,16 @@ def save_packet_builder(
     return _detail(get_project(session, project_id))
 
 
+def _audience_slug(name: str, fallback: str) -> str:
+    slug = "".join(
+        character.lower() if character.isalnum() else "_"
+        for character in name.strip()
+    ).strip("_")
+    while "__" in slug:
+        slug = slug.replace("__", "_")
+    return slug or fallback
+
+
 def _ensure_export_packet(project: Project, session: Session) -> PacketVersion:
     for version in project.packet_versions:
         if version.deleted_at is None and version.audience == "base_packet":
@@ -2716,6 +3119,12 @@ def _ordered_packet_pages(
             )
         elif page_id in rendered_pages:
             output.append(rendered_pages[page_id])
+            if (
+                page_id == "accommodations"
+                and "accommodations_signature" in rendered_pages
+                and "accommodations_signature" not in ordered_ids
+            ):
+                output.append(rendered_pages["accommodations_signature"])
     return output
 
 
@@ -2824,6 +3233,21 @@ def _packet_styles(
     .page-header.green { border-color: __GREEN__; }
     .page-header.purple { border-color: __PURPLE__; }
     .page-header.orange { border-color: __ORANGE__; }
+    .custom-page-header {
+      align-items: center;
+      display: flex;
+      gap: 0;
+      min-height: 0.36in;
+      padding: 0.08in 0.12in;
+      width: 100%;
+    }
+    .custom-page-header h2 {
+      display: block;
+      max-width: none;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      width: 100%;
+    }
     .badge {
       align-items: center;
       background: __BLUE__;
@@ -2834,7 +3258,7 @@ def _packet_styles(
       font-size: 14px;
       font-weight: 800;
       height: 32px;
-      justify-content: center;
+      justify-content: space-around;
       line-height: 32px;
       overflow: hidden;
       position: relative;
@@ -3007,6 +3431,9 @@ def _packet_styles(
       z-index: 2;
     }
     .cover-district-mark {
+      display: none;
+    }
+    .cover-version-footer {
       display: none;
     }
     .cover-kicker {
@@ -3298,6 +3725,89 @@ def _packet_styles(
       padding: 14px;
       overflow-wrap: anywhere;
     }
+    .accommodation-note {
+      margin: 0 0 14px;
+      overflow-wrap: anywhere;
+      padding: 0 0 10px;
+    }
+    .accommodation-note h3 {
+      color: __PRIMARY__;
+      margin-bottom: 6px;
+    }
+    .accommodations-student-details {
+      border-bottom: 2px solid __BORDER__;
+      color: __TEXT__;
+      display: flex;
+      gap: 18px;
+      margin: -4px 0 14px;
+      padding: 0 0 10px;
+      overflow-wrap: anywhere;
+    }
+    .accommodations-parent-strengths {
+      border-top: 2px solid __BORDER__;
+      margin-top: 16px;
+      padding-top: 12px;
+    }
+    .signature-note {
+      color: __TEXT__;
+      font-size: 12px;
+      line-height: 1.55;
+      margin: 0 0 20px;
+      max-width: 7.2in;
+      overflow-wrap: anywhere;
+    }
+    .signature-lines {
+      display: block;
+      margin-top: 12px;
+    }
+    .signature-row {
+      align-items: flex-end;
+      display: flex;
+      gap: 16px;
+      margin-bottom: 31px;
+    }
+    .signature-header {
+      margin-bottom: 14px;
+    }
+    .signature-header .signature-label {
+      margin-bottom: 0;
+    }
+    .signature-field {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .signature-field.date {
+      flex: 0 0 1.35in;
+    }
+    .signature-label {
+      color: __TEXT__;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      margin-bottom: 16px;
+      text-transform: uppercase;
+    }
+    .signature-line {
+      border-bottom: 1.5px solid __TEXT__;
+      height: 14px;
+      width: 100%;
+    }
+    .custom-page-body {
+      color: __TEXT__;
+      font-size: 12px;
+      line-height: 1.65;
+      min-height: 6.8in;
+      overflow-wrap: anywhere;
+    }
+    .custom-page-body.blank-lines {
+      display: block;
+      min-height: 6.9in;
+    }
+    .custom-page-body.blank-lines div {
+      border-bottom: 1px solid rgba(0,0,0,0.18);
+      height: 0.35in;
+      margin: 0;
+    }
     .two-col {
       display: grid;
       gap: 14px;
@@ -3571,440 +4081,2597 @@ def _packet_styles(
       background: __PRIMARY__;
       color: #ffffff;
     }
-    body.template-mountain-illustrated .cover {
-      background:
-        radial-gradient(circle at 50% 10%, rgba(255, 244, 194, 0.7), rgba(255,255,255,0.36) 12%, transparent 24%),
-        radial-gradient(circle at 50% 18%, rgba(255,255,255,0.9), transparent 31%),
-        linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(239, 252, 252, 0.9) 40%, rgba(178, 224, 224, 0.94) 61%, rgba(54, 127, 133, 0.97) 78%, rgba(3, 50, 57, 1) 100%),
-        linear-gradient(145deg, #ffffff 0%, #d9f4f1 100%);
+    body.template-alpine-photo {
+      background: __SOFT__;
       color: __TEXT__;
-      min-height: 10.1in;
     }
-    body.template-mountain-illustrated .cover-card {
-      min-height: 10.1in;
+    body.template-alpine-photo h1,
+    body.template-alpine-photo h2,
+    body.template-alpine-photo h3,
+    body.template-alpine-photo h4 {
+      font-family: __HEADING_FONT__;
     }
-    body.template-mountain-illustrated .cover:before,
-    body.template-mountain-illustrated .cover:after {
-      bottom: 0;
+    body.template-alpine-photo .cover {
+      background: linear-gradient(180deg, __ACCENT__ 0%, __PRIMARY__ 62%, #071827 100%);
+      color: #ffffff;
+      overflow: hidden;
+    }
+    body.template-alpine-photo .cover:before {
+      border-bottom: 5.15in solid rgba(255,255,255,0.18);
+      border-left: 3.1in solid transparent;
+      border-right: 3.1in solid transparent;
+      bottom: 0.88in;
       content: "";
+      height: 0;
       position: absolute;
+      right: -0.92in;
       width: 0;
       z-index: 0;
     }
-    body.template-mountain-illustrated .cover:before {
-      border-left: 3.25in solid transparent;
-      border-right: 3.05in solid transparent;
-      border-bottom: 2.1in solid rgba(128, 202, 211, 0.52);
-      left: -1.3in;
-    }
-    body.template-mountain-illustrated .cover:after {
-      border-left: 3.6in solid transparent;
-      border-right: 2.75in solid transparent;
-      border-bottom: 2.26in solid rgba(28, 130, 155, 0.44);
-      right: -1.15in;
-    }
-    body.template-mountain-illustrated .cover-card:before,
-    body.template-mountain-illustrated .cover-card:after {
+    body.template-alpine-photo .cover:after {
+      border-bottom: 1.52in solid rgba(240,247,252,0.88);
+      border-left: 0.93in solid transparent;
+      border-right: 0.93in solid transparent;
+      bottom: 4.5in;
       content: "";
-      display: none;
-    }
-    body.template-mountain-illustrated .cover-content {
-      margin-top: 0.1in;
-      position: relative;
-      text-align: center;
-      z-index: 3;
-    }
-    body.template-mountain-illustrated .cover-content:before,
-    body.template-mountain-illustrated .cover-content:after {
-      border-top: 2px solid rgba(11, 114, 133, 0.42);
-      border-radius: 999px 999px 0 0;
-      content: "";
-      height: 0.12in;
+      height: 0;
       position: absolute;
-      top: -0.1in;
-      width: 0.24in;
-    }
-    body.template-mountain-illustrated .cover-content:before {
-      right: 1.15in;
-      transform: rotate(-14deg);
-    }
-    body.template-mountain-illustrated .cover-content:after {
-      right: 0.88in;
-      transform: rotate(14deg);
-    }
-    body.template-mountain-illustrated .cover-card h1,
-    body.template-mountain-illustrated .cover-card h2,
-    body.template-mountain-illustrated .cover-student {
-      color: __PRIMARY__;
-      text-align: center;
-    }
-    body.template-mountain-illustrated .cover-kicker,
-    body.template-mountain-illustrated .cover-school {
-      color: #0b7285;
-      text-align: center;
-    }
-    body.template-mountain-illustrated .cover-year {
-      background: linear-gradient(90deg, #0f766e, __TEAL__);
-      box-shadow: 0 4px 0 rgba(15, 45, 85, 0.12);
-      display: block;
-      margin-left: auto;
-      margin-right: auto;
-      max-width: 280px;
-      text-align: center;
-    }
-    body.template-mountain-illustrated .service-chip,
-    body.template-mountain-illustrated .meta-value {
-      color: __PRIMARY__;
-    }
-    body.template-mountain-illustrated .chip-dot {
-      background: __PRIMARY__;
-      color: #ffffff;
-    }
-    body.template-mountain-illustrated .cover-icon {
-      background: linear-gradient(135deg, #09345a, #13b7b4);
-      border-color: rgba(255,255,255,0.8);
-      color: #ffffff;
-      box-shadow: 0 8px 22px rgba(7, 61, 88, 0.22);
-    }
-    body.template-mountain-illustrated .brand-logo {
-      filter: drop-shadow(0 6px 10px rgba(7,61,88,0.18));
-    }
-    body.template-mountain-illustrated .meta-box {
-      background: rgba(255,255,255,0.16);
-      border-color: rgba(255,255,255,0.26);
-    }
-    body.template-mountain-illustrated .meta-label {
-      color: #9fe7ea;
-    }
-    body.template-mountain-illustrated .cover-bottom {
-      background: transparent;
-      border-top: 0;
-      color: #ffffff;
-      margin: 0 -52px -52px;
-      padding: 0.18in 0.52in 0.26in;
-      position: relative;
-      z-index: 4;
-    }
-    body.template-mountain-illustrated .cover-bottom:before {
-      display: none;
-    }
-    body.template-mountain-illustrated .cover-bottom:after {
-      display: none;
-    }
-    body.template-mountain-illustrated .cover-details {
-      margin-top: 0;
-      position: relative;
-      z-index: 5;
-    }
-    body.template-mountain-illustrated .cover-services {
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin: 0 auto 0.16in;
-    }
-    body.template-mountain-illustrated .cover-bottom .service-chip,
-    body.template-mountain-illustrated .cover-bottom .meta-value {
-      color: #ffffff;
-    }
-    body.template-mountain-illustrated .cover-bottom .chip-dot {
-      background: rgba(8, 43, 67, 0.92);
-      border-color: rgba(255,255,255,0.28);
-      box-shadow: none;
-      color: #ffffff;
-    }
-    body.template-mountain-illustrated .cover-bottom .meta-grid {
-      margin-top: 0;
-    }
-    body.template-mountain-illustrated .mountains {
-      background:
-        repeating-linear-gradient(90deg, rgba(3, 54, 60, 0.0) 0 0.18in, rgba(3, 54, 60, 0.5) 0.18in 0.21in, rgba(3, 54, 60, 0.0) 0.21in 0.36in);
-      bottom: -0.02in;
-      height: 2.72in;
-      opacity: 0.95;
+      right: 1.25in;
+      width: 0;
       z-index: 1;
     }
-    body.template-mountain-illustrated .mountains:before {
-      border-left-width: 2.35in;
-      border-right-width: 2.25in;
-      border-bottom-width: 1.66in;
-      border-bottom-color: rgba(5, 94, 101, 0.94);
-      left: -0.1in;
-    }
-    body.template-mountain-illustrated .mountains:after {
-      border-left-width: 2.8in;
-      border-right-width: 2.65in;
-      border-bottom-width: 1.86in;
-      border-bottom-color: rgba(30, 125, 151, 0.88);
-      right: -0.45in;
-    }
-    body.template-elementary-pop .cover {
-      background:
-        radial-gradient(circle at 9% 9%, rgba(239,121,0,0.18), transparent 18%),
-        radial-gradient(circle at 88% 15%, rgba(39,184,178,0.18), transparent 17%),
-        radial-gradient(circle at 18% 82%, rgba(125,102,183,0.16), transparent 20%),
-        #fffaf1;
-      color: __TEXT__;
-    }
-    body.template-elementary-pop .cover-card h1 {
-      color: __PRIMARY__;
-      font-size: 42px;
-      letter-spacing: 0.02em;
-      text-align: center;
-    }
-    body.template-elementary-pop .cover-card h2,
-    body.template-elementary-pop .cover-student {
-      color: #3f7f7d;
-      text-align: center;
-    }
-    body.template-elementary-pop .cover-kicker,
-    body.template-elementary-pop .cover-school {
-      color: #3f7f7d;
-      text-align: center;
-    }
-    body.template-elementary-pop .cover-year,
-    body.template-elementary-pop .badge,
-    body.template-elementary-pop .chip-dot {
-      border-radius: 999px;
-    }
-    body.template-elementary-pop .cover-icon {
-      background: #db7347;
-      border-color: rgba(255,255,255,0.9);
-      color: #ffffff;
-      box-shadow: 0 8px 18px rgba(217, 115, 71, 0.22);
-    }
-    body.template-elementary-pop .service-chip,
-    body.template-elementary-pop .meta-value {
-      color: __TEXT__;
-    }
-    body.template-elementary-pop .chip-dot {
-      background: __ORANGE__;
-      color: #ffffff;
-    }
-    body.template-elementary-pop .meta-box,
-    body.template-elementary-pop .section,
-    body.template-elementary-pop .soft-card,
-    body.template-elementary-pop .goal-card {
-      border-radius: 18px;
-    }
-    body.template-elementary-pop .meta-box {
-      background: rgba(255,250,240,0.88);
-      border-color: rgba(214,155,45,0.32);
-    }
-    body.template-elementary-pop .meta-label {
-      color: #9a5b20;
-    }
-    body.template-elementary-pop .mountains {
-      opacity: 0.18;
-    }
-    body.template-alpine-photo .cover {
-      background:
-        linear-gradient(112deg, #071827 0%, #102a43 56%, transparent 57%),
-        linear-gradient(155deg, transparent 0 58%, rgba(255,255,255,0.1) 58% 62%, transparent 62%),
-        radial-gradient(circle at 83% 47%, rgba(255,255,255,0.54), transparent 16%),
-        linear-gradient(160deg, #1f6fb8 0%, #0d1f35 100%);
-      color: white;
-    }
     body.template-alpine-photo .cover-card {
-      justify-content: center;
-      padding-right: 240px;
+      justify-content: space-between;
+      min-height: 9.55in;
+      padding: 0.5in 0.48in 0.34in;
+      position: relative;
+    }
+    body.template-alpine-photo .cover-card:before {
+      background: rgba(7,24,39,0.34);
+      bottom: 1.03in;
+      content: "";
+      height: 4.1in;
+      position: absolute;
+      right: -0.4in;
+      transform: skewX(-31deg);
+      width: 2.45in;
+      z-index: 1;
+    }
+    body.template-alpine-photo .cover-card:after {
+      background: rgba(255,255,255,0.38);
+      bottom: 1.54in;
+      content: "";
+      height: 0.018in;
+      left: 0.44in;
+      position: absolute;
+      right: 0.5in;
+      z-index: 2;
+    }
+    body.template-alpine-photo .cover-content {
+      background: rgba(7,24,39,0.78);
+      border-left: 0.065in solid __ORANGE__;
+      box-sizing: border-box;
+      padding: 0.28in 0.3in 0.3in;
+      text-align: left;
+      width: 4.05in;
+      z-index: 3;
+    }
+    body.template-alpine-photo .cover-icon {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.36);
+      border-radius: 50%;
+      box-shadow: none;
+      color: #ffffff;
+      height: 56px;
+      margin: 0 0 16px;
+      width: 56px;
+    }
+    body.template-alpine-photo .brand-logo {
+      height: 58px;
+      margin: 0 0 16px;
+      object-fit: contain;
+      width: 94px;
+    }
+    body.template-alpine-photo .cover-kicker {
+      color: __ORANGE__;
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.28em;
+      margin-bottom: 2px;
+      text-align: left;
+    }
+    body.template-alpine-photo .cover-school {
+      color: rgba(255,255,255,0.74);
+      font-size: 8px;
+      letter-spacing: 0.16em;
+      margin: 0 0 0.16in;
+      text-align: left;
+    }
+    body.template-alpine-photo .cover-card h1 {
+      color: #ffffff;
+      font-size: 47px;
+      letter-spacing: 0;
+      line-height: 0.9;
+      text-align: left;
+      text-shadow: 0 2px 0 rgba(0,0,0,0.16);
     }
     body.template-alpine-photo .cover-year {
-      background: #149fe3;
-      margin-left: 0;
+      background: __ORANGE__;
+      color: #ffffff;
+      margin: 0.2in 0 0.18in;
+      min-width: 1.7in;
+      padding: 0.08in 0.16in;
+      text-align: left;
+    }
+    body.template-alpine-photo .cover-student {
+      color: #ffffff;
+      font-size: 20px;
+      letter-spacing: 0;
+      margin: 0;
+      text-align: left;
+    }
+    body.template-alpine-photo .cover-district-mark {
+      background-color: transparent;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Cpath d='M78 8A56 56 0 1 0 113 105A49 49 0 0 1 78 8Z' fill='%23eef7ff'/%3E%3C/svg%3E");
+      background-position: center;
+      background-repeat: no-repeat;
+      background-size: contain;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      color: transparent;
+      display: block;
+      font-size: 0;
+      height: 0.9in;
+      position: absolute;
+      right: 0.92in;
+      top: 0.92in;
+      width: 0.9in;
+      z-index: 2;
+    }
+    body.template-alpine-photo .cover-district-mark:after {
+      display: none;
+    }
+    body.template-alpine-photo .cover-bottom {
+      align-self: center;
+      background: rgba(7,24,39,0.86);
+      border: 1px solid rgba(255,255,255,0.18);
+      border-bottom: 0.08in solid __ORANGE__;
+      border-radius: 0;
+      box-sizing: border-box;
+      color: #ffffff;
+      margin-left: auto;
+      margin-right: auto;
+      padding: 0.14in 0.18in 0.1in;
+      width: 5.7in;
+      z-index: 4;
     }
     body.template-alpine-photo .cover-details {
-      margin-left: 0;
+      margin: 0;
       text-align: left;
-      width: 420px;
+      width: 100%;
     }
-    body.template-alpine-photo .cover-student,
-    body.template-alpine-photo .cover-services {
-      justify-content: flex-start;
-      text-align: left;
+    body.template-alpine-photo .cover-services,
+    body.template-alpine-photo .cover-services.service-count-5,
+    body.template-alpine-photo .cover-services.service-count-6,
+    body.template-alpine-photo .cover-services.service-count-7,
+    body.template-alpine-photo .cover-services.service-count-8 {
+      gap: 0.07in;
+      justify-content: center;
+      margin: 0 auto 0.1in;
+      max-width: none;
+    }
+    body.template-alpine-photo .cover-services .service-chip,
+    body.template-alpine-photo .cover-services.service-count-5 .service-chip,
+    body.template-alpine-photo .cover-services.service-count-6 .service-chip,
+    body.template-alpine-photo .cover-services.service-count-7 .service-chip,
+    body.template-alpine-photo .cover-services.service-count-8 .service-chip {
+      color: #ffffff;
+      font-size: 6.5px;
+      gap: 4px;
+      max-width: 0.64in;
+      min-width: 0.56in;
+      overflow-wrap: anywhere;
+    }
+    body.template-alpine-photo .cover-services.service-count-7 .service-chip,
+    body.template-alpine-photo .cover-services.service-count-8 .service-chip {
+      font-size: 5.8px;
+      max-width: 0.56in;
+      min-width: 0.48in;
+    }
+    body.template-alpine-photo .cover-services .chip-dot {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.4);
+      color: #ffffff;
+      height: 32px;
+      width: 32px;
     }
     body.template-alpine-photo .meta-grid {
-      margin-left: 0;
+      border-spacing: 7px;
+      left: -0.19in;
+      margin: 0 auto;
+      position: relative;
+      table-layout: fixed;
+      width: calc(100% - 14px);
+    }
+    body.template-alpine-photo .meta-box {
+      background: rgba(255,255,255,0.09);
+      border: 1px solid rgba(255,255,255,0.22);
+      border-radius: 0;
+      min-height: 0;
+      padding: 7px 8px;
+    }
+    body.template-alpine-photo .meta-label {
+      color: rgba(255,255,255,0.66);
+      font-size: 7px;
+      letter-spacing: 0.1em;
+    }
+    body.template-alpine-photo .meta-value {
+      color: #ffffff;
+      font-size: 9px;
+      font-weight: 700;
     }
     body.template-alpine-photo .mountains {
-      height: 220px;
-      left: auto;
-      opacity: 0.52;
-      width: 310px;
-    }
-    body.template-botanical-frame .cover {
-      background:
-        radial-gradient(circle at 6% 7%, rgba(85,122,70,0.18), transparent 16%),
-        radial-gradient(circle at 92% 87%, rgba(85,122,70,0.14), transparent 18%),
-        #fbfbf5;
-      border: 8px solid rgba(85,122,70,0.55);
-      color: #2f463c;
-    }
-    body.template-botanical-frame .cover-card h1,
-    body.template-botanical-frame .cover-card h2,
-    body.template-botanical-frame .cover-student {
-      color: #2f463c;
-      font-family: Georgia, "Times New Roman", serif;
-      text-align: center;
-    }
-    body.template-botanical-frame .cover-kicker,
-    body.template-botanical-frame .cover-school {
-      color: #557a46;
-      text-align: center;
-    }
-    body.template-botanical-frame .cover-year {
-      background: #557a46;
+      bottom: 0;
       display: block;
-      margin-left: auto;
-      margin-right: auto;
-      max-width: 220px;
-      text-align: center;
+      height: 2.22in;
+      left: 0;
+      opacity: 1;
+      overflow: visible;
+      position: absolute;
+      right: 0;
+      width: auto;
+      z-index: 2;
     }
-    body.template-botanical-frame .cover-icon {
-      background: #62786e;
-      border-color: rgba(255,255,255,0.9);
-      color: #ffffff;
-      box-shadow: 0 8px 18px rgba(63, 84, 76, 0.18);
+    body.template-alpine-photo .mountains:before {
+      border-bottom: 2.02in solid __PRIMARY__;
+      border-left: 1.7in solid transparent;
+      border-right: 1.7in solid transparent;
+      bottom: 0;
+      content: "";
+      height: 0;
+      left: 2.7in;
+      position: absolute;
+      width: 0;
     }
-    body.template-botanical-frame .service-chip,
-    body.template-botanical-frame .meta-value {
-      color: #2f463c;
+    body.template-alpine-photo .mountains:after {
+      border-bottom: 1.58in solid #071827;
+      border-left: 1.42in solid transparent;
+      border-right: 1.42in solid transparent;
+      bottom: 0;
+      content: "";
+      height: 0;
+      left: 4.65in;
+      position: absolute;
+      width: 0;
     }
-    body.template-botanical-frame .chip-dot {
-      background: #557a46;
-      color: #ffffff;
++    /* Field Notes packet template
+       Drop this block into _packet_styles() after the shared/base packet CSS.
+       Palette token mapping:
+       __PRIMARY__ = Primary
+       __ACCENT__/__TEAL__/__BLUE__ = Secondary
+       __ORANGE__ = Accent
+       __SOFT__ = Background
+       __CARD__ = Cards
+       __TEXT__ = Text
+    */
+
+    body.template-field-notes {
+      background: __SOFT__;
+      color: __TEXT__;
     }
-    body.template-botanical-frame .meta-box {
-      background: rgba(255,255,255,0.72);
-      border-color: rgba(85,122,70,0.35);
+
+    body.template-field-notes h1,
+    body.template-field-notes h2,
+    body.template-field-notes h3,
+    body.template-field-notes h4 {
+      color: __PRIMARY__;
+      font-family: __HEADING_FONT__;
     }
-    body.template-botanical-frame .meta-label {
-      color: #557a46;
-    }
-    body.template-botanical-frame .mountains {
-      display: none;
-    }
-    body.template-chalkboard {
-      background: #f7f7f3;
-      color: #172033;
-    }
-    body.template-chalkboard .cover {
+
+    body.template-field-notes .cover {
       background:
-        linear-gradient(135deg, rgba(255,255,255,0.06) 0 25%, transparent 25% 50%, rgba(255,255,255,0.04) 50% 75%, transparent 75%),
-        #1f2933;
-      border: 8px solid #475569;
-      color: #f8fafc;
+        repeating-radial-gradient(
+          ellipse at 92% 12%,
+          transparent 0,
+          transparent 15px,
+          rgba(0,0,0,0.035) 16px,
+          transparent 17px,
+          transparent 30px
+        ),
+        __SOFT__;
+      color: __TEXT__;
+      overflow: hidden;
     }
-    body.template-chalkboard .cover-card h1,
-    body.template-chalkboard .cover-card h2,
-    body.template-chalkboard .cover-student,
-    body.template-chalkboard .cover-kicker,
-    body.template-chalkboard .cover-school {
-      color: #f8fafc;
-      text-align: center;
+
+    body.template-field-notes .cover:before {
+      background: __PRIMARY__;
+      bottom: 0.38in;
+      content: "";
+      left: 0.38in;
+      position: absolute;
+      top: 0.38in;
+      width: 0.075in;
+      z-index: 0;
     }
-    body.template-chalkboard .cover-year {
-      background: transparent;
-      border: 2px solid rgba(255,255,255,0.58);
-      display: block;
-      margin-left: auto;
-      margin-right: auto;
-      max-width: 220px;
-      text-align: center;
+
+    body.template-field-notes .cover:after {
+      background: __ORANGE__;
+      bottom: 0.38in;
+      content: "";
+      left: 0.56in;
+      position: absolute;
+      top: 0.38in;
+      width: 0.022in;
+      z-index: 0;
     }
-    body.template-chalkboard .meta-box {
-      background: transparent;
-      border: 1px solid rgba(255,255,255,0.32);
+
+    body.template-field-notes .cover-card {
+      justify-content: space-between;
+      padding: 0.56in 0.56in 0.42in 0.86in;
     }
-    body.template-chalkboard .mountains {
-      opacity: 0.12;
+
+    body.template-field-notes .cover-content {
+      text-align: left;
+      width: 5.15in;
     }
-    body.template-soft-organic .cover {
-      background:
-        radial-gradient(circle at 87% 11%, rgba(204,168,119,0.28), transparent 20%),
-        radial-gradient(circle at 11% 88%, rgba(204,168,119,0.22), transparent 19%),
-        #fbf6ed;
-      color: #4a3f34;
-    }
-    body.template-soft-organic .cover-card h1,
-    body.template-soft-organic .cover-card h2,
-    body.template-soft-organic .cover-student {
-      color: #5f4d3e;
-      font-family: Georgia, "Times New Roman", serif;
-      text-align: center;
-    }
-    body.template-soft-organic .cover-kicker,
-    body.template-soft-organic .cover-school {
-      color: #7b9274;
-      text-align: center;
-    }
-    body.template-soft-organic .cover-year {
-      background: #9b7f5f;
-      border-radius: 3px;
-      display: block;
-      margin-left: auto;
-      margin-right: auto;
-      max-width: 220px;
-      text-align: center;
-    }
-    body.template-soft-organic .service-chip,
-    body.template-soft-organic .meta-value {
-      color: #4a3f34;
-    }
-    body.template-soft-organic .chip-dot {
-      background: #7b9274;
+
+    body.template-field-notes .cover-icon {
+      background: __PRIMARY__;
+      border: 2px solid __CARD__;
+      border-radius: 50%;
+      box-shadow: 0 5px 0 rgba(0,0,0,0.08);
       color: #ffffff;
+      height: 58px;
+      margin: 0 0 16px;
+      width: 58px;
     }
-    body.template-soft-organic .meta-box,
-    body.template-soft-organic .section,
-    body.template-soft-organic .soft-card,
-    body.template-soft-organic .goal-card {
-      border-radius: 18px;
+
+    body.template-field-notes .brand-logo {
+      height: 58px;
+      margin: 0 0 16px;
+      width: 94px;
     }
-    body.template-soft-organic .mountains {
-      display: none;
-    }
-    body.template-purple-dot .cover {
-      background:
-        radial-gradient(circle, rgba(126, 87, 194, 0.42) 0 2px, transparent 2px) right center / 18px 18px no-repeat,
-        linear-gradient(90deg, #ffffff 0%, #ffffff 64%, #f3e8ff 64%, #ffffff 100%);
-      color: #101827;
-    }
-    body.template-purple-dot .cover-card h1,
-    body.template-purple-dot .cover-card h2 {
-      color: #101827;
-      font-size: 36px;
-    }
-    body.template-purple-dot .cover-student {
-      color: #101827;
+
+    body.template-field-notes .cover-kicker {
+      color: __ACCENT__;
+      font-size: 10px;
+      letter-spacing: 0.28em;
+      margin-bottom: 2px;
       text-align: left;
     }
-    body.template-purple-dot .cover-kicker,
-    body.template-purple-dot .cover-school {
-      color: #6d3fc0;
+
+    body.template-field-notes .cover-school {
+      color: __PRIMARY__;
+      font-size: 9px;
+      letter-spacing: 0.18em;
+      margin: 0 0 20px;
+      text-align: left;
     }
-    body.template-purple-dot .cover-year,
-    body.template-purple-dot .chip-dot,
-    body.template-purple-dot .page-header {
-      background: #6d3fc0;
+
+    body.template-field-notes .cover-card h1 {
+      color: __PRIMARY__;
+      font-size: 45px;
+      letter-spacing: -0.025em;
+      line-height: 0.94;
+      text-align: left;
+    }
+
+    body.template-field-notes .cover-year {
+      background: __ACCENT__;
+      border-left: 6px solid __ORANGE__;
+      box-shadow: 0 4px 0 rgba(0,0,0,0.08);
+      display: inline-block;
+      margin: 18px 0 24px;
+      min-width: 1.82in;
+      padding: 7px 16px;
+      text-align: center;
+    }
+
+    body.template-field-notes .cover-student {
+      border-bottom: 1px solid __PRIMARY__;
+      border-top: 1px solid __PRIMARY__;
+      color: __TEXT__;
+      font-family: __HEADING_FONT__;
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+      margin: 0;
+      padding: 12px 0 10px;
+      text-align: left;
+    }
+
+    body.template-field-notes .cover-bottom {
+      background: transparent;
+      color: __TEXT__;
+      margin: 0;
+      padding: 0;
+      width: 100%;
+    }
+
+    body.template-field-notes .cover-details {
+      margin: 0;
+      text-align: left;
+    }
+
+    body.template-field-notes .cover-services {
+      border-collapse: separate;
+      border-spacing: 7px 0;
+      display: table;
+      margin: 0 0 12px;
+      table-layout: fixed;
+      width: 100%;
+    }
+
+    body.template-field-notes .cover-services .service-chip {
+      background: __PRIMARY__;
+      border-top: 5px solid __ORANGE__;
       color: #ffffff;
+      display: table-cell;
+      font-size: 7px;
+      height: 0.84in;
+      max-width: none;
+      padding: 8px 6px 6px;
+      vertical-align: top;
+      width: auto;
     }
-    body.template-purple-dot .service-chip,
-    body.template-purple-dot .meta-value {
-      color: #101827;
-    }
-    body.template-purple-dot .meta-box {
-      background: #6d3fc0;
-      border: 0;
-    }
-    body.template-purple-dot .meta-label,
-    body.template-purple-dot .meta-value {
+
+    body.template-field-notes .cover-services .chip-dot {
+      background: rgba(255,255,255,0.10);
+      border: 1px solid rgba(255,255,255,0.42);
+      border-radius: 50%;
       color: #ffffff;
+      height: 29px;
+      margin: 0 auto 5px;
+      width: 29px;
     }
-    body.template-purple-dot .mountains {
+
+    body.template-field-notes .cover-services .service-chip > span:last-child {
+      color: #ffffff;
+      min-height: 19px;
+    }
+
+    body.template-field-notes .meta-grid {
+      border-collapse: separate;
+      border-spacing: 7px;
+      margin: 0;
+      table-layout: fixed;
+      width: 100%;
+    }
+
+    body.template-field-notes .meta-box {
+      background: __CARD__;
+      border: 1px solid rgba(0,0,0,0.16);
+      border-radius: 0;
+      box-shadow: 0 3px 0 rgba(0,0,0,0.06);
+      color: __TEXT__;
+      min-height: 0;
+      padding: 9px 10px;
+    }
+
+    body.template-field-notes .meta-label {
+      color: __ACCENT__;
+      font-size: 7px;
+      letter-spacing: 0.13em;
+    }
+
+    body.template-field-notes .meta-value {
+      color: __TEXT__;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    body.template-field-notes .meta-spacer {
+      width: 12.5%;
+    }
+
+    body.template-field-notes .mountains {
       display: none;
     }
+
+    /* Interior pages */
+    body.template-field-notes .page:not(.cover) {
+      background:
+        linear-gradient(90deg, __PRIMARY__ 0, __PRIMARY__ 0.065in, transparent 0.065in),
+        repeating-linear-gradient(180deg, transparent 0, transparent 0.31in, rgba(0,0,0,0.025) 0.32in),
+        __SOFT__;
+      box-shadow: none;
+      padding-left: 0.19in;
+    }
+
+    body.template-field-notes .page-header {
+      background: transparent;
+      border: 0;
+      border-bottom: 2px solid __PRIMARY__;
+      border-radius: 0;
+      margin-bottom: 15px;
+      padding: 4px 0 9px;
+    }
+
+    body.template-field-notes .page-header:after {
+      background: __ORANGE__;
+      bottom: -5px;
+      content: "";
+      height: 3px;
+      left: 0;
+      position: absolute;
+      width: 0.82in;
+    }
+
+    body.template-field-notes .page-header .badge,
+    body.template-field-notes .page-header .badge.green,
+    body.template-field-notes .page-header .badge.purple,
+    body.template-field-notes .page-header .badge.orange {
+      background: __PRIMARY__;
+      border: 1.5px solid __PRIMARY__;
+      border-radius: 50%;
+      color: #ffffff;
+    }
+
+    body.template-field-notes .section,
+    body.template-field-notes .soft-card,
+    body.template-field-notes .goal-card {
+      background: __CARD__;
+      border: 1px solid rgba(0,0,0,0.16);
+      border-left: 5px solid __ACCENT__;
+      border-radius: 0;
+      box-shadow: 0 3px 0 rgba(0,0,0,0.05);
+    }
+
+    body.template-field-notes .goal-card.green,
+    body.template-field-notes .goal-card.purple {
+      background: __CARD__;
+      border-color: rgba(0,0,0,0.16);
+      border-left-color: __ACCENT__;
+    }
+
+    body.template-field-notes .domain-title .mini-dot,
+    body.template-field-notes .domain-title .mini-dot.blue,
+    body.template-field-notes .domain-title .mini-dot.green,
+    body.template-field-notes .domain-title .mini-dot.purple,
+    body.template-field-notes .domain-title .mini-dot.orange {
+      background: __PRIMARY__;
+      border-radius: 50%;
+      color: #ffffff;
+    }
+
+    body.template-field-notes th {
+      background: __PRIMARY__;
+      color: #ffffff;
+      font-size: 8px;
+      letter-spacing: 0.05em;
+    }
+
+    body.template-field-notes th,
+    body.template-field-notes td {
+      border-color: rgba(0,0,0,0.20);
+    }
+
+    body.template-field-notes .notes-lines {
+      background:
+        repeating-linear-gradient(
+          to bottom,
+          transparent 0,
+          transparent 23px,
+          rgba(0,0,0,0.18) 24px
+        ),
+        __CARD__;
+      border-radius: 0;
+    }
+
+    body.template-field-notes .staff-checklist {
+      background: __CARD__;
+      border: 1px solid rgba(0,0,0,0.16);
+      border-left: 5px solid __ORANGE__;
+      border-radius: 0;
+    }
+
+    body.template-field-notes .check-box {
+      border-color: __ORANGE__;
+    }
++    /* Editorial Ledger - Service Index revision
+       Drop this block into _packet_styles() after the shared/base packet CSS.
+       Palette token mapping:
+       __PRIMARY__ = Primary
+       __ACCENT__ = Secondary
+       __ORANGE__ = Accent
+       __SOFT__ = Background
+       __CARD__ = Cards
+       __TEXT__ = Text
+    */
+
+    body.template-editorial-ledger {
+      background: __SOFT__;
+      color: __TEXT__;
+    }
+
+    body.template-editorial-ledger h1,
+    body.template-editorial-ledger h2,
+    body.template-editorial-ledger h3,
+    body.template-editorial-ledger h4 {
+      color: __PRIMARY__;
+      font-family: Georgia, "Times New Roman", serif;
+      letter-spacing: 0;
+    }
+
+    body.template-editorial-ledger .cover {
+      background: __CARD__;
+      color: __TEXT__;
+      overflow: hidden;
+    }
+
+    body.template-editorial-ledger .cover-card {
+      justify-content: flex-start;
+      padding: 0.42in 0.42in 0.38in;
+    }
+
+    body.template-editorial-ledger .cover-card:before {
+      background: __PRIMARY__;
+      content: "";
+      height: 0.025in;
+      left: 0.12in;
+      position: absolute;
+      right: 0.12in;
+      top: 0.18in;
+    }
+
+    body.template-editorial-ledger .cover-content {
+      border: 0;
+      height: 6.45in;
+      padding: 0;
+      position: relative;
+      text-align: left;
+      width: 100%;
+    }
+
+    body.template-editorial-ledger .cover-content:after {
+      color: __PRIMARY__;
+      content: attr(data-year-mark);
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 112px;
+      font-weight: 700;
+      line-height: 0.8;
+      opacity: 0.065;
+      position: absolute;
+      right: -0.08in;
+      top: 0.02in;
+      z-index: 0;
+    }
+
+    body.template-editorial-ledger .cover-icon,
+    body.template-editorial-ledger .brand-logo {
+      display: none;
+    }
+
+    body.template-editorial-ledger .cover-kicker {
+      color: __PRIMARY__;
+      font-size: 7.5px;
+      font-weight: 700;
+      left: 0;
+      letter-spacing: 0.22em;
+      margin: 0;
+      position: absolute;
+      top: 0;
+      text-align: left;
+      text-transform: uppercase;
+    }
+
+    body.template-editorial-ledger .cover-school {
+      color: __ACCENT__;
+      font-size: 7.5px;
+      font-weight: 500;
+      letter-spacing: 0.05em;
+      margin: 0;
+      position: absolute;
+      right: 0;
+      text-align: right;
+      text-transform: none;
+      top: 0;
+    }
+
+    body.template-editorial-ledger .cover-card h1 {
+      color: __PRIMARY__;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 47px;
+      font-weight: 700;
+      left: 0.15in;
+      letter-spacing: -0.035em;
+      line-height: 0.9;
+      margin: 0;
+      position: absolute;
+      text-align: left;
+      text-transform: none;
+      top: 1.78in;
+      width: 4.05in;
+      z-index: 2;
+    }
+
+    body.template-editorial-ledger .cover-card h1:before {
+      color: __ACCENT__;
+      content: "STUDENT SERVICES EDITION";
+      display: block;
+      font-family: __BODY_FONT__;
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.24em;
+      margin-bottom: 0.14in;
+      text-transform: uppercase;
+    }
+
+    body.template-editorial-ledger .cover-card h1:after {
+      color: __TEXT__;
+      content: "A concise working reference for services, goals, accommodations, data collection, and staff communication.";
+      display: block;
+      font-family: __BODY_FONT__;
+      font-size: 9px;
+      font-weight: 400;
+      letter-spacing: 0;
+      line-height: 1.55;
+      margin-top: 0.18in;
+      width: 3.8in;
+    }
+
+    body.template-editorial-ledger .cover-year {
+      background: transparent;
+      color: __ACCENT__;
+      font-family: __BODY_FONT__;
+      font-size: 7.5px;
+      font-weight: 500;
+      letter-spacing: 0.05em;
+      margin: 0;
+      padding: 0;
+      position: absolute;
+      right: 0;
+      text-align: right;
+      top: 0;
+      white-space: nowrap;
+    }
+
+    body.template-editorial-ledger .cover-student {
+      border-bottom: 1px solid __PRIMARY__;
+      border-top: 1px solid __PRIMARY__;
+      color: __PRIMARY__;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 27px;
+      font-weight: 400;
+      left: 0.15in;
+      letter-spacing: 0;
+      margin: 0;
+      padding: 0.38in 0 0.17in;
+      position: absolute;
+      text-align: left;
+      text-transform: none;
+      top: 4.72in;
+      width: 4.25in;
+    }
+
+    body.template-editorial-ledger .cover-student:before {
+      color: __ACCENT__;
+      content: "PREPARED FOR";
+      font-family: __BODY_FONT__;
+      font-size: 7px;
+      font-weight: 700;
+      left: 0;
+      letter-spacing: 0.18em;
+      position: absolute;
+      top: 0.13in;
+    }
+
+    body.template-editorial-ledger .cover-bottom {
+      background: transparent;
+      bottom: 0.22in;
+      color: __TEXT__;
+      left: 0.42in;
+      margin: 0;
+      padding: 0;
+      position: absolute;
+      right: 0.42in;
+      top: 0;
+      width: auto;
+      z-index: 3;
+    }
+
+    body.template-editorial-ledger .cover-details {
+      height: 100%;
+      margin: 0;
+      position: relative;
+      text-align: left;
+      width: 100%;
+    }
+
+    body.template-editorial-ledger .cover-services,
+    body.template-editorial-ledger .cover-services.service-count-5,
+    body.template-editorial-ledger .cover-services.service-count-6,
+    body.template-editorial-ledger .cover-services.service-count-7,
+    body.template-editorial-ledger .cover-services.service-count-8 {
+      border: 0;
+      border-left: 0.035in solid __ORANGE__;
+      display: block;
+      margin: 0;
+      max-width: none;
+      padding: 0.03in 0 0 0.18in;
+      position: absolute;
+      right: 0;
+      top: 2.67in;
+      width: 2.08in;
+    }
+
+    body.template-editorial-ledger .cover-services:before {
+      color: __PRIMARY__;
+      content: "SERVICE INDEX";
+      display: block;
+      font-family: __BODY_FONT__;
+      font-size: 8px;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      margin-bottom: 0.12in;
+      text-transform: uppercase;
+    }
+
+    body.template-editorial-ledger .cover-services .service-chip,
+    body.template-editorial-ledger .cover-services.service-count-5 .service-chip,
+    body.template-editorial-ledger .cover-services.service-count-6 .service-chip,
+    body.template-editorial-ledger .cover-services.service-count-7 .service-chip,
+    body.template-editorial-ledger .cover-services.service-count-8 .service-chip {
+      border-bottom: 1px solid rgba(0,0,0,0.18);
+      color: __TEXT__;
+      display: block;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 9.5px;
+      font-weight: 400;
+      letter-spacing: 0;
+      line-height: 1.12;
+      margin: 0;
+      max-width: none;
+      min-height: 0;
+      padding: 0.08in 0 0.07in;
+      text-align: left;
+      text-transform: none;
+      width: 100%;
+    }
+
+    body.template-editorial-ledger .cover-services .service-chip + .service-chip {
+      border-left: 0;
+    }
+
+    body.template-editorial-ledger .cover-services .chip-dot {
+      display: none;
+    }
+
+    body.template-editorial-ledger .cover-services .service-chip > span:last-child {
+      color: __TEXT__;
+      display: block;
+      min-height: 0;
+      width: 100%;
+    }
+
+    body.template-editorial-ledger .meta-grid {
+      border-collapse: collapse;
+      border: 1px solid rgba(38,54,74,0.42);
+      bottom: 0.22in;
+      left: 0;
+      margin: 0;
+      position: absolute;
+      table-layout: fixed;
+      width: 100%;
+    }
+
+    body.template-editorial-ledger .meta-box {
+      background: __CARD__;
+      border: 0;
+      border-left: 1px solid rgba(38,54,74,0.34);
+      border-radius: 0;
+      color: __TEXT__;
+      height: 0.76in;
+      min-height: 0;
+      padding: 0.16in 0.14in 0.1in;
+      vertical-align: top;
+      width: 25%;
+    }
+
+    body.template-editorial-ledger .meta-grid td:first-child,
+    body.template-editorial-ledger .meta-grid tr:nth-child(2) td:nth-child(2) {
+      border-left: 0;
+    }
+
+    body.template-editorial-ledger .meta-label {
+      color: __ACCENT__;
+      font-size: 6.4px;
+      letter-spacing: 0.16em;
+    }
+
+    body.template-editorial-ledger .meta-value {
+      color: __PRIMARY__;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 9.2px;
+      font-weight: 700;
+      line-height: 1.2;
+      margin-top: 0.08in;
+    }
+
+    body.template-editorial-ledger .meta-spacer {
+      display: none;
+    }
+
+    body.template-editorial-ledger .mountains {
+      display: none;
+    }
+
+    /* Interior pages */
+
+    body.template-editorial-ledger .page:not(.cover) {
+      background: __CARD__;
+      border-top: 0.11in solid __PRIMARY__;
+      box-shadow: none;
+      padding: 0.12in 0.08in 0.08in;
+    }
+
+    body.template-editorial-ledger .page-header {
+      align-items: flex-start;
+      background: transparent;
+      border: 0;
+      border-bottom: 1px solid __PRIMARY__;
+      border-radius: 0;
+      margin-bottom: 16px;
+      padding: 5px 0 10px;
+    }
+
+    body.template-editorial-ledger .page-header .badge {
+      background: transparent;
+      border: 1px solid __ACCENT__;
+      border-radius: 0;
+      color: __ACCENT__;
+    }
+
+    body.template-editorial-ledger .page-header h2 {
+      color: __PRIMARY__;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 23px;
+      font-weight: 700;
+      text-transform: none;
+    }
+
+    body.template-editorial-ledger .eyebrow {
+      color: __ACCENT__;
+      font-size: 7px;
+      letter-spacing: 0.18em;
+    }
+
+    body.template-editorial-ledger .section,
+    body.template-editorial-ledger .soft-card,
+    body.template-editorial-ledger .goal-card {
+      background: __CARD__;
+      border: 0;
+      border-bottom: 1px solid rgba(0,0,0,0.18);
+      border-radius: 0;
+      box-shadow: none;
+      padding: 12px 0;
+    }
+
+    body.template-editorial-ledger .domain-title {
+      border-top: 3px solid __ORANGE__;
+      margin-top: 18px;
+      padding-top: 8px;
+    }
+
+    body.template-editorial-ledger .domain-title .mini-dot,
+    body.template-editorial-ledger .badge,
+    body.template-editorial-ledger .badge.green,
+    body.template-editorial-ledger .badge.purple,
+    body.template-editorial-ledger .badge.orange {
+      background: transparent;
+      border: 1px solid __ACCENT__;
+      border-radius: 0;
+      color: __ACCENT__;
+    }
+
+    body.template-editorial-ledger th {
+      background: __PRIMARY__;
+      color: #ffffff;
+      font-family: __BODY_FONT__;
+      font-size: 7px;
+      letter-spacing: 0.10em;
+    }
+
+    body.template-editorial-ledger th,
+    body.template-editorial-ledger td {
+      border-color: rgba(0,0,0,0.24);
+    }
+
+    body.template-editorial-ledger .staff-checklist {
+      background: __SOFT__;
+      border: 0;
+      border-left: 0.06in solid __ORANGE__;
+      border-radius: 0;
+    }
+
+    body.template-editorial-ledger .staff-checklist h3 {
+      color: __PRIMARY__;
+      font-family: Georgia, "Times New Roman", serif;
+      text-transform: none;
+    }
+
+    body.template-editorial-ledger .notes-lines {
+      border-radius: 0;
+    }
+
+    body.template-editorial-ledger .cover-district-mark {
+      color: __PRIMARY__;
+      display: block;
+      font-family: __BODY_FONT__;
+      font-size: 7.5px;
+      font-weight: 700;
+      left: 0.42in;
+      letter-spacing: 0.22em;
+      position: absolute;
+      text-transform: uppercase;
+      top: 0.42in;
+      z-index: 4;
+    }
+
+    body.template-editorial-ledger .cover-district-mark:after {
+      content: " - SPECIAL EDUCATION";
+    }
+
+    body.template-editorial-ledger .cover-version-footer {
+      bottom: 0.08in;
+      color: __ACCENT__;
+      display: block;
+      font-size: 7px;
+      font-weight: 700;
+      left: 0.42in;
+      letter-spacing: 0.16em;
+      position: absolute;
+      text-transform: uppercase;
+      z-index: 4;
+    }
+
+    body.template-editorial-ledger .cover-kicker,
+    body.template-editorial-ledger .cover-school {
+      display: none;
+    }
+
+    body.template-editorial-ledger .cover-year:before {
+      content: "Academic Year ";
+    }
+
+    body.template-editorial-ledger .page-header .badge,
+    body.template-editorial-ledger .page-header .badge.green,
+    body.template-editorial-ledger .page-header .badge.purple,
+    body.template-editorial-ledger .page-header .badge.orange,
+    body.template-editorial-ledger .domain-title .mini-dot {
+      background: __PRIMARY__;
+      border-color: __PRIMARY__;
+      color: #ffffff;
+    }
+
+    /* Modular Blocks */
+    body.template-modular-blocks {
+      background: __SOFT__;
+      color: __TEXT__;
+    }
+
+    body.template-modular-blocks h1,
+    body.template-modular-blocks h2,
+    body.template-modular-blocks h3,
+    body.template-modular-blocks h4 {
+      color: __PRIMARY__;
+      font-family: __HEADING_FONT__;
+    }
+
+    body.template-modular-blocks .cover {
+      background: __SOFT__;
+      color: __TEXT__;
+      overflow: hidden;
+    }
+
+    body.template-modular-blocks .cover-card {
+      background: __SOFT__;
+      display: block;
+      padding: 0;
+      position: relative;
+    }
+
+    body.template-modular-blocks .cover-card:before {
+      background: __PRIMARY__;
+      content: "";
+      height: 1.08in;
+      left: 0.42in;
+      position: absolute;
+      right: 0.42in;
+      top: 0.42in;
+      z-index: 0;
+    }
+
+    body.template-modular-blocks .cover-card:after {
+      background: __ORANGE__;
+      content: "";
+      height: 0.16in;
+      left: 0.42in;
+      position: absolute;
+      top: 4.63in;
+      width: 1.78in;
+      z-index: 4;
+    }
+
+    body.template-modular-blocks .cover-content {
+      background: __CARD__;
+      border: 0.025in solid __PRIMARY__;
+      box-sizing: border-box;
+      height: 4.37in;
+      left: 0.42in;
+      padding: 1.32in 0.34in 0.3in;
+      position: absolute;
+      text-align: left;
+      top: 0.42in;
+      width: 4.42in;
+      z-index: 2;
+    }
+
+    body.template-modular-blocks .cover-content:before {
+      background: __ACCENT__;
+      content: "";
+      height: 0.28in;
+      position: absolute;
+      right: -0.025in;
+      top: 1.08in;
+      width: 1.42in;
+    }
+
+    body.template-modular-blocks .cover-icon,
+    body.template-modular-blocks .brand-logo {
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      height: 0.58in;
+      left: 0.3in;
+      margin: 0;
+      object-fit: contain;
+      padding: 0;
+      position: absolute;
+      top: 0.25in;
+      width: 0.78in;
+    }
+
+    body.template-modular-blocks .cover-icon {
+      align-items: center;
+      background: __ACCENT__;
+      color: #ffffff;
+      display: flex;
+      justify-content: center;
+      width: 0.58in;
+    }
+
+    body.template-modular-blocks .cover-kicker {
+      color: __ORANGE__;
+      font-size: 8.5px;
+      font-weight: 800;
+      letter-spacing: 0.22em;
+      margin: 0 0 0.15in;
+      text-align: left;
+    }
+
+    body.template-modular-blocks .cover-school {
+      color: __ACCENT__;
+      font-size: 7.5px;
+      font-weight: 800;
+      letter-spacing: 0.16em;
+      margin: 0 0 0.16in;
+      text-align: left;
+    }
+
+    body.template-modular-blocks .cover-card h1 {
+      color: __PRIMARY__;
+      font-size: 45px;
+      font-weight: 800;
+      letter-spacing: 0;
+      line-height: 0.88;
+      margin: 0;
+      text-align: left;
+    }
+
+    body.template-modular-blocks .cover-year {
+      background: __PRIMARY__;
+      color: #ffffff;
+      display: inline-block;
+      font-family: __HEADING_FONT__;
+      font-size: 13px;
+      font-weight: 800;
+      margin: 0.25in 0 0.2in;
+      min-width: 1.78in;
+      padding: 0.1in 0.18in;
+      text-align: left;
+    }
+
+    body.template-modular-blocks .cover-student {
+      color: __PRIMARY__;
+      font-size: 17px;
+      font-weight: 800;
+      letter-spacing: 0;
+      margin: 0;
+      text-align: left;
+      text-transform: uppercase;
+    }
+
+    body.template-modular-blocks .cover-district-mark {
+      display: none;
+    }
+
+    body.template-modular-blocks .cover-bottom,
+    body.template-modular-blocks .cover-details {
+      background: transparent;
+      border: 0;
+      height: auto;
+      margin: 0;
+      padding: 0;
+      position: static;
+      width: auto;
+    }
+
+    body.template-modular-blocks .cover-services,
+    body.template-modular-blocks .cover-services.service-count-5,
+    body.template-modular-blocks .cover-services.service-count-6,
+    body.template-modular-blocks .cover-services.service-count-7,
+    body.template-modular-blocks .cover-services.service-count-8 {
+      align-content: flex-start;
+      background: __PRIMARY__;
+      box-sizing: border-box;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0;
+      left: 4.86in;
+      margin: 0;
+      min-height: 3.25in;
+      padding: 0.22in 0.18in;
+      position: absolute;
+      top: 1.17in;
+      width: 2.32in;
+      z-index: 3;
+    }
+
+    body.template-modular-blocks .cover-services:before {
+      color: #ffffff;
+      content: "SERVICE AREAS";
+      display: block;
+      flex: 0 0 100%;
+      font-family: __HEADING_FONT__;
+      font-size: 8px;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      margin-bottom: 0.12in;
+      text-align: left;
+    }
+
+    body.template-modular-blocks .cover-services .service-chip,
+    body.template-modular-blocks .cover-services.service-count-5 .service-chip,
+    body.template-modular-blocks .cover-services.service-count-6 .service-chip,
+    body.template-modular-blocks .cover-services.service-count-7 .service-chip,
+    body.template-modular-blocks .cover-services.service-count-8 .service-chip {
+      align-items: center;
+      background: rgba(255,255,255,0.08);
+      border: 0;
+      border-bottom: 1px solid rgba(255,255,255,0.24);
+      box-sizing: border-box;
+      color: #ffffff;
+      display: flex;
+      flex: 0 0 100%;
+      flex-direction: row;
+      font-size: 7.5px;
+      gap: 0.08in;
+      line-height: 1.08;
+      margin: 0;
+      max-width: none;
+      min-height: 0.38in;
+      overflow: hidden;
+      padding: 0.05in;
+      text-align: left;
+      width: 100%;
+    }
+
+    body.template-modular-blocks .cover-services .service-chip:nth-child(2n+1) {
+      background: rgba(255,255,255,0.14);
+    }
+
+    body.template-modular-blocks .cover-services.service-count-7 .service-chip,
+    body.template-modular-blocks .cover-services.service-count-8 .service-chip {
+      font-size: 6.7px;
+      min-height: 0.31in;
+      padding-bottom: 0.035in;
+      padding-top: 0.035in;
+    }
+
+    body.template-modular-blocks .cover-services .chip-dot {
+      background: __ACCENT__;
+      border: 0;
+      border-radius: 0;
+      color: #ffffff;
+      flex: 0 0 0.28in;
+      height: 0.28in;
+      padding: 0.045in;
+      width: 0.28in;
+    }
+
+    body.template-modular-blocks .cover-services.service-count-7 .chip-dot,
+    body.template-modular-blocks .cover-services.service-count-8 .chip-dot {
+      flex-basis: 0.24in;
+      height: 0.24in;
+      width: 0.24in;
+    }
+
+    body.template-modular-blocks .cover-services .service-chip > span:last-child {
+      display: block;
+      min-height: 0;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      width: auto;
+    }
+
+    body.template-modular-blocks .meta-grid {
+      border-collapse: separate;
+      border-spacing: 0.07in;
+      bottom: 0.58in;
+      left: 0.04in;
+      margin: 0;
+      position: absolute;
+      table-layout: fixed;
+      width: 7.24in;
+      z-index: 3;
+    }
+
+    body.template-modular-blocks .meta-box {
+      background: __CARD__;
+      border: 0.018in solid __PRIMARY__;
+      border-radius: 0;
+      color: __TEXT__;
+      height: 0.73in;
+      min-height: 0;
+      padding: 0.1in 0.12in;
+      vertical-align: top;
+    }
+
+    body.template-modular-blocks .meta-box:nth-child(2n) {
+      border-top: 0.1in solid __ACCENT__;
+    }
+
+    body.template-modular-blocks .meta-label {
+      color: __ORANGE__;
+      font-size: 6.5px;
+      font-weight: 800;
+      letter-spacing: 0.13em;
+    }
+
+    body.template-modular-blocks .meta-value {
+      color: __TEXT__;
+      font-size: 9px;
+      font-weight: 700;
+      line-height: 1.15;
+      margin-top: 0.05in;
+    }
+
+    body.template-modular-blocks .meta-spacer {
+      visibility: hidden;
+    }
+
+    body.template-modular-blocks .mountains {
+      background: __PRIMARY__;
+      bottom: 0;
+      display: block;
+      height: 1.12in;
+      left: auto;
+      opacity: 1;
+      overflow: visible;
+      position: absolute;
+      right: 0;
+      width: 3.12in;
+      z-index: 1;
+    }
+
+    body.template-modular-blocks .mountains:before {
+      background: __ACCENT__;
+      border: 0;
+      bottom: 0.1in;
+      content: "";
+      height: 0.84in;
+      left: -0.68in;
+      position: absolute;
+      transform: skewX(-24deg);
+      width: 1.58in;
+    }
+
+    body.template-modular-blocks .mountains:after {
+      background: __ORANGE__;
+      border: 0;
+      bottom: 0;
+      content: "";
+      height: 0.62in;
+      left: -1.5in;
+      position: absolute;
+      transform: skewX(-24deg);
+      width: 0.9in;
+    }
+
+    body.template-modular-blocks .page:not(.cover) {
+      background:
+        linear-gradient(90deg, __PRIMARY__ 0, __PRIMARY__ 0.16in, transparent 0.16in),
+        __SOFT__;
+      padding-left: 0.28in;
+    }
+
+    body.template-modular-blocks .page-header {
+      background: __PRIMARY__;
+      border: 0;
+      border-radius: 0;
+      margin-bottom: 0.16in;
+      min-height: 0.5in;
+      padding: 0.1in 0.14in;
+      position: relative;
+    }
+
+    body.template-modular-blocks .page-header:after {
+      background: __ORANGE__;
+      bottom: 0;
+      content: "";
+      height: 0.09in;
+      position: absolute;
+      right: 0;
+      width: 0.72in;
+    }
+
+    body.template-modular-blocks .page-header h2 {
+      color: #ffffff;
+      margin: 0;
+    }
+
+    body.template-modular-blocks .page-header .badge,
+    body.template-modular-blocks .page-header .badge.green,
+    body.template-modular-blocks .page-header .badge.purple,
+    body.template-modular-blocks .page-header .badge.orange {
+      background: __ACCENT__;
+      border-radius: 0;
+      color: #ffffff;
+    }
+
+    body.template-modular-blocks .eyebrow {
+      color: __ORANGE__;
+    }
+
+    body.template-modular-blocks .section,
+    body.template-modular-blocks .soft-card,
+    body.template-modular-blocks .goal-card {
+      background: __CARD__;
+      border: 1px solid rgba(0,0,0,0.16);
+      border-left: 0.1in solid __ACCENT__;
+      border-radius: 0;
+      box-shadow: none;
+    }
+
+    body.template-modular-blocks .section:nth-of-type(even),
+    body.template-modular-blocks .goal-card:nth-of-type(even) {
+      border-left-color: __ORANGE__;
+    }
+
+    body.template-modular-blocks .goal-card.green,
+    body.template-modular-blocks .goal-card.purple {
+      background: __CARD__;
+      border-color: rgba(0,0,0,0.16);
+      border-left-color: __ACCENT__;
+    }
+
+    body.template-modular-blocks .domain-title {
+      background: __PRIMARY__;
+      color: #ffffff;
+      margin: 0.12in 0 0.06in;
+      min-height: 0.34in;
+      padding: 0.06in 0.09in;
+    }
+
+    body.template-modular-blocks .domain-title h3,
+    body.template-modular-blocks .domain-title h4 {
+      color: #ffffff;
+    }
+
+    body.template-modular-blocks .domain-title .mini-dot,
+    body.template-modular-blocks .domain-title .mini-dot.blue,
+    body.template-modular-blocks .domain-title .mini-dot.green,
+    body.template-modular-blocks .domain-title .mini-dot.purple,
+    body.template-modular-blocks .domain-title .mini-dot.orange {
+      background: __ACCENT__;
+      border-radius: 0;
+      color: #ffffff;
+    }
+
+    body.template-modular-blocks th {
+      background: __PRIMARY__;
+      color: #ffffff;
+      font-size: 8px;
+      letter-spacing: 0.06em;
+    }
+
+    body.template-modular-blocks th:nth-child(2n) {
+      background: __ACCENT__;
+    }
+
+    body.template-modular-blocks th,
+    body.template-modular-blocks td {
+      border-color: rgba(0,0,0,0.2);
+    }
+
+    body.template-modular-blocks .notes-lines {
+      background:
+        repeating-linear-gradient(
+          to bottom,
+          __CARD__ 0,
+          __CARD__ 23px,
+          rgba(0,0,0,0.18) 24px
+        );
+      border: 1px solid rgba(0,0,0,0.2);
+      border-left: 0.1in solid __ORANGE__;
+      border-radius: 0;
+    }
+
+    body.template-modular-blocks .staff-checklist {
+      background: __CARD__;
+      border: 1px solid rgba(0,0,0,0.2);
+      border-left: 0.1in solid __ORANGE__;
+      border-radius: 0;
+    }
+
+    body.template-modular-blocks .staff-checklist h3 {
+      color: __PRIMARY__;
+    }
+
+    body.template-mid-century-classroom {
+      background: __SOFT__;
+      color: __TEXT__;
+    }
+    body.template-mid-century-classroom h1,
+    body.template-mid-century-classroom h2,
+    body.template-mid-century-classroom h3,
+    body.template-mid-century-classroom h4 {
+      color: __PRIMARY__;
+    }
+    body.template-mid-century-classroom .cover {
+      background:
+        radial-gradient(circle at 87% 13%, __ORANGE__ 0, __ORANGE__ 0.44in, transparent 0.46in),
+        linear-gradient(135deg, __SOFT__ 0%, __SOFT__ 66%, rgba(255,255,255,0.36) 66%, rgba(255,255,255,0.36) 100%);
+      color: __TEXT__;
+    }
+    body.template-mid-century-classroom .cover-card {
+      padding: 0.48in;
+    }
+    body.template-mid-century-classroom .cover-card:before {
+      background: __PRIMARY__;
+      content: "";
+      height: 2.58in;
+      left: -0.42in;
+      position: absolute;
+      top: 1.08in;
+      transform: rotate(-7deg);
+      width: 4.52in;
+      z-index: 0;
+    }
+    body.template-mid-century-classroom .cover-card:after {
+      background: __ACCENT__;
+      bottom: 0.22in;
+      content: "";
+      height: 1.4in;
+      position: absolute;
+      right: -0.44in;
+      transform: rotate(6deg);
+      width: 3.7in;
+      z-index: 0;
+    }
+    body.template-mid-century-classroom .cover-content {
+      background: __CARD__;
+      border: 0.025in solid __TEXT__;
+      box-shadow: 0.12in 0.12in 0 __ORANGE__;
+      padding: 0.36in;
+      position: absolute;
+      right: 0.5in;
+      text-align: left;
+      top: 0.74in;
+      width: 4.76in;
+    }
+    body.template-mid-century-classroom .cover-icon {
+      background: __ORANGE__;
+      border: 0.018in solid __TEXT__;
+      border-radius: 50%;
+      color: __TEXT__;
+      display: flex;
+      height: 0.64in;
+      line-height: 0;
+      margin: 0 0 0.18in;
+      width: 0.64in;
+    }
+    body.template-mid-century-classroom .brand-logo {
+      height: 0.64in;
+      margin: 0 0 0.18in;
+      width: 1.0in;
+    }
+    body.template-mid-century-classroom .cover-kicker {
+      color: __ACCENT__;
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.2em;
+      margin: 0 0 0.04in;
+      text-align: left;
+    }
+    body.template-mid-century-classroom .cover-school {
+      color: __TEXT__;
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.13em;
+      margin: 0 0 0.16in;
+      text-align: left;
+    }
+    body.template-mid-century-classroom .cover-card h1 {
+      color: __PRIMARY__;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 48px;
+      letter-spacing: -0.035em;
+      line-height: 0.88;
+      text-align: left;
+      text-transform: none;
+    }
+    body.template-mid-century-classroom .cover-year {
+      background: __ACCENT__;
+      color: #ffffff;
+      display: inline-block;
+      font-size: 15px;
+      margin: 0.22in 0 0.18in;
+      padding: 0.08in 0.18in;
+    }
+    body.template-mid-century-classroom .cover-student {
+      color: __TEXT__;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 19px;
+      font-weight: 700;
+      letter-spacing: 0;
+      margin: 0;
+      text-align: left;
+      text-transform: none;
+    }
+    body.template-mid-century-classroom .cover-bottom {
+      background: transparent;
+      margin: 0;
+      padding: 0;
+      position: static;
+    }
+    body.template-mid-century-classroom .cover-services,
+    body.template-mid-century-classroom .cover-services.service-count-5,
+    body.template-mid-century-classroom .cover-services.service-count-6,
+    body.template-mid-century-classroom .cover-services.service-count-7,
+    body.template-mid-century-classroom .cover-services.service-count-8 {
+      background: __PRIMARY__;
+      bottom: 1.48in;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.08in;
+      justify-content: center;
+      left: 0.5in;
+      margin: 0;
+      padding: 0.16in;
+      position: absolute;
+      width: 4.15in;
+      z-index: 2;
+    }
+    body.template-mid-century-classroom .cover-services.service-count-1 {
+      width: 1.05in;
+    }
+    body.template-mid-century-classroom .cover-services.service-count-2 {
+      width: 2.05in;
+    }
+    body.template-mid-century-classroom .cover-services.service-count-3 {
+      width: 3.05in;
+    }
+    body.template-mid-century-classroom .service-chip,
+    body.template-mid-century-classroom .cover-services.service-count-5 .service-chip,
+    body.template-mid-century-classroom .cover-services.service-count-6 .service-chip,
+    body.template-mid-century-classroom .cover-services.service-count-7 .service-chip,
+    body.template-mid-century-classroom .cover-services.service-count-8 .service-chip {
+      color: #ffffff;
+      display: inline-flex;
+      flex: 0 0 0.72in;
+      font-size: 6.7px;
+      gap: 4px;
+      line-height: 1.05;
+      padding: 0;
+      width: 0.72in;
+    }
+    body.template-mid-century-classroom .chip-dot {
+      background: __ORANGE__;
+      border: 0.015in solid #ffffff;
+      border-radius: 50%;
+      color: __TEXT__;
+      height: 0.34in;
+      line-height: 0;
+      width: 0.34in;
+    }
+    body.template-mid-century-classroom .cover-service-icon {
+      height: 58%;
+      width: 58%;
+    }
+    body.template-mid-century-classroom .meta-grid {
+      border-spacing: 0.06in;
+      bottom: 0.44in;
+      left: 0.44in;
+      margin: 0;
+      position: absolute;
+      table-layout: fixed;
+      width: 5.86in;
+      z-index: 2;
+    }
+    body.template-mid-century-classroom .meta-spacer {
+      display: none;
+    }
+    body.template-mid-century-classroom .meta-box {
+      background: __CARD__;
+      border: 0.018in solid __TEXT__;
+      border-radius: 0;
+      min-height: 0.72in;
+      padding: 0.11in;
+      width: 1.28in;
+    }
+    body.template-mid-century-classroom .meta-box:nth-child(2n) {
+      background: __ORANGE__;
+    }
+    body.template-mid-century-classroom .meta-label {
+      color: __ACCENT__;
+      font-size: 7px;
+      letter-spacing: 0.1em;
+    }
+    body.template-mid-century-classroom .meta-box:nth-child(2n) .meta-label {
+      color: __PRIMARY__;
+    }
+    body.template-mid-century-classroom .meta-value {
+      color: __TEXT__;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    body.template-mid-century-classroom .cover-version-footer {
+      bottom: 0.18in;
+      color: __ACCENT__;
+      display: block;
+      font-size: 7px;
+      font-weight: 800;
+      left: 0.5in;
+      letter-spacing: 0.14em;
+      position: absolute;
+      text-transform: uppercase;
+      z-index: 3;
+    }
+    body.template-mid-century-classroom .mountains {
+      display: block;
+      height: 1.34in;
+      left: 0;
+      position: absolute;
+      top: 0;
+      width: 100%;
+      z-index: 1;
+    }
+    body.template-mid-century-classroom .mountains:before {
+      background: __ACCENT__;
+      content: "";
+      height: 0.22in;
+      left: 0.48in;
+      position: absolute;
+      top: 0.34in;
+      transform: rotate(-3deg);
+      width: 2.16in;
+    }
+    body.template-mid-century-classroom .mountains:after {
+      background: __ORANGE__;
+      content: "";
+      height: 0.22in;
+      position: absolute;
+      right: 0.72in;
+      top: 0.58in;
+      transform: rotate(4deg);
+      width: 1.56in;
+    }
+    body.template-mid-century-classroom .page:not(.cover) {
+      background:
+        linear-gradient(90deg, __PRIMARY__ 0 0.12in, transparent 0.12in),
+        linear-gradient(135deg, transparent 0 78%, rgba(227,178,60,0.12) 78% 100%),
+        __CARD__;
+      border-top: 0.06in solid __PRIMARY__;
+      padding-left: 0.22in;
+    }
+    body.template-mid-century-classroom .page-header {
+      background: __SOFT__;
+      border: 0.02in solid __TEXT__;
+      border-radius: 0;
+      box-shadow: 0.05in 0.05in 0 __ORANGE__;
+      margin-bottom: 0.16in;
+      padding: 0.09in 0.12in;
+    }
+    body.template-mid-century-classroom .page-header .badge,
+    body.template-mid-century-classroom .badge {
+      background: __ORANGE__;
+      border: 0.015in solid __TEXT__;
+      border-radius: 50%;
+      color: __TEXT__;
+    }
+    body.template-mid-century-classroom .page-header h2 {
+      color: __PRIMARY__;
+      font-family: Georgia, "Times New Roman", serif;
+      letter-spacing: -0.02em;
+      text-transform: none;
+    }
+    body.template-mid-century-classroom .eyebrow {
+      color: __ACCENT__;
+    }
+    body.template-mid-century-classroom .section,
+    body.template-mid-century-classroom .soft-card,
+    body.template-mid-century-classroom .goal-card {
+      background: __CARD__;
+      border: 0.018in solid __TEXT__;
+      border-radius: 0;
+      box-shadow: 0.04in 0.04in 0 rgba(182,88,63,0.22);
+    }
+    body.template-mid-century-classroom .section h3,
+    body.template-mid-century-classroom .goal-card h4 {
+      color: __PRIMARY__;
+      font-family: Georgia, "Times New Roman", serif;
+      text-transform: none;
+    }
+    body.template-mid-century-classroom .goal-card.green,
+    body.template-mid-century-classroom .goal-card.purple,
+    body.template-mid-century-classroom .goal-card.orange {
+      border-color: __TEXT__;
+    }
+    body.template-mid-century-classroom .domain-title {
+      border-bottom: 0.025in solid __ACCENT__;
+      padding-bottom: 0.06in;
+    }
+    body.template-mid-century-classroom .domain-title .mini-dot,
+    body.template-mid-century-classroom .service-area-card .mini-dot {
+      background: __ORANGE__;
+      border: 0.012in solid __TEXT__;
+      color: __TEXT__;
+    }
+    body.template-mid-century-classroom .service-area-card {
+      background: __SOFT__;
+      border: 0.015in solid __TEXT__;
+      border-radius: 0;
+    }
+    body.template-mid-century-classroom th {
+      background: __PRIMARY__;
+      color: #ffffff;
+      font-size: 8px;
+      letter-spacing: 0.06em;
+    }
+    body.template-mid-century-classroom th,
+    body.template-mid-century-classroom td {
+      border-color: #d6c8ad;
+    }
+    body.template-mid-century-classroom .staff-checklist {
+      background: #fff7e3;
+      border-color: __ORANGE__;
+      border-radius: 0;
+    }
+    body.template-mid-century-classroom .staff-checklist h3 {
+      color: __ACCENT__;
+    }
+
+    body.template-typographic-poster {
+      background: __SOFT__;
+      color: __TEXT__;
+    }
+    body.template-typographic-poster .cover {
+      background: __SOFT__;
+      color: __TEXT__;
+    }
+    body.template-typographic-poster .cover-card {
+      display: block;
+      padding: 0.46in;
+    }
+    body.template-typographic-poster .cover-card:before {
+      content: "";
+      display: none;
+    }
+    body.template-typographic-poster .typographic-watermark {
+      color: rgba(0,0,0,0.045);
+      font-family: __HEADING_FONT__;
+      font-size: 4.7in;
+      font-weight: 900;
+      left: 0.12in;
+      letter-spacing: -0.18in;
+      line-height: 0.82;
+      max-width: 6.3in;
+      opacity: 1;
+      position: absolute;
+      top: 0.42in;
+      z-index: 0;
+    }
+    body.template-typographic-poster .typographic-watermark.logo {
+      height: 4.2in;
+      left: 1.25in;
+      object-fit: contain;
+      opacity: 0.055;
+      top: 0.9in;
+      width: 5.45in;
+    }
+    body.template-typographic-poster .cover-card:after {
+      background: __ORANGE__;
+      content: "";
+      height: 0.2in;
+      left: 0.46in;
+      position: absolute;
+      right: 0.46in;
+      top: 4.7in;
+      z-index: 1;
+    }
+    body.template-typographic-poster .cover-content {
+      left: 0.46in;
+      position: absolute;
+      text-align: left;
+      top: 0.48in;
+      width: 6.95in;
+      z-index: 2;
+    }
+    body.template-typographic-poster .cover-icon,
+    body.template-typographic-poster .brand-logo {
+      display: none;
+    }
+    body.template-typographic-poster .cover-kicker {
+      color: __ACCENT__;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.26em;
+      margin: 0 0 0.12in;
+      text-align: left;
+    }
+    body.template-typographic-poster .cover-school {
+      color: __TEXT__;
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      margin: 0 0 0.2in;
+      text-align: left;
+    }
+    body.template-typographic-poster .cover-card h1 {
+      color: __PRIMARY__;
+      font-family: __HEADING_FONT__;
+      font-size: 65px;
+      font-weight: 900;
+      letter-spacing: -0.06em;
+      line-height: 0.78;
+      text-align: left;
+    }
+    body.template-typographic-poster .cover-year {
+      background: transparent;
+      border-bottom: 0.03in solid __PRIMARY__;
+      color: __ORANGE__;
+      font-size: 20px;
+      margin: 0.28in 0 0.16in;
+      padding: 0 0 0.07in;
+      text-align: left;
+    }
+    body.template-typographic-poster .cover-student {
+      color: __TEXT__;
+      font-family: __HEADING_FONT__;
+      font-size: 22px;
+      font-weight: 900;
+      letter-spacing: 0.01em;
+      margin: 0;
+      text-align: left;
+      text-transform: uppercase;
+    }
+    body.template-typographic-poster .cover-bottom {
+      background: transparent;
+      margin: 0;
+      padding: 0;
+      position: static;
+    }
+    body.template-typographic-poster .cover-services,
+    body.template-typographic-poster .cover-services.service-count-5,
+    body.template-typographic-poster .cover-services.service-count-6,
+    body.template-typographic-poster .cover-services.service-count-7,
+    body.template-typographic-poster .cover-services.service-count-8 {
+      bottom: 1.8in;
+      display: block;
+      left: 0.46in;
+      margin: 0;
+      max-width: none;
+      padding-left: 0.18in;
+      position: absolute;
+      width: 2.35in;
+      z-index: 2;
+    }
+    body.template-typographic-poster .cover-services:before {
+      color: __ACCENT__;
+      content: "SERVICE AREAS";
+      display: block;
+      font-family: __HEADING_FONT__;
+      font-size: 8px;
+      font-weight: 900;
+      letter-spacing: 0.19em;
+      margin-bottom: 0.1in;
+    }
+    body.template-typographic-poster .service-chip,
+    body.template-typographic-poster .cover-services.service-count-5 .service-chip,
+    body.template-typographic-poster .cover-services.service-count-6 .service-chip,
+    body.template-typographic-poster .cover-services.service-count-7 .service-chip,
+    body.template-typographic-poster .cover-services.service-count-8 .service-chip {
+      border-bottom: 1px solid rgba(0,0,0,0.22);
+      color: __TEXT__;
+      display: block;
+      font-size: 8px;
+      font-weight: 800;
+      line-height: 1.2;
+      max-width: none;
+      padding: 0.07in 0;
+      text-align: left;
+      width: 100%;
+    }
+    body.template-typographic-poster .cover-services .chip-dot {
+      display: none;
+    }
+    body.template-typographic-poster .meta-grid {
+      border-collapse: collapse;
+      bottom: 0.46in;
+      left: 2.98in;
+      margin: 0;
+      position: absolute;
+      table-layout: fixed;
+      width: 4.48in;
+      z-index: 2;
+    }
+    body.template-typographic-poster .meta-box {
+      background: __CARD__;
+      border: 0.018in solid __PRIMARY__;
+      border-radius: 0;
+      min-height: 0.74in;
+      padding: 0.1in;
+      width: 25%;
+    }
+    body.template-typographic-poster .meta-box:first-child {
+      background: __PRIMARY__;
+    }
+    body.template-typographic-poster .meta-box:first-child .meta-label,
+    body.template-typographic-poster .meta-box:first-child .meta-value {
+      color: #ffffff;
+    }
+    body.template-typographic-poster .meta-label {
+      color: __ACCENT__;
+      font-size: 7px;
+      letter-spacing: 0.12em;
+    }
+    body.template-typographic-poster .meta-value {
+      color: __TEXT__;
+      font-size: 10px;
+      font-weight: 900;
+    }
+    body.template-typographic-poster .cover-version-footer {
+      bottom: 0.24in;
+      color: __SOFT__;
+      display: block;
+      font-size: 7px;
+      font-weight: 800;
+      left: 0.46in;
+      letter-spacing: 0.14em;
+      position: absolute;
+      text-transform: uppercase;
+      z-index: 3;
+    }
+    body.template-typographic-poster .mountains {
+      background: __PRIMARY__;
+      bottom: 0;
+      display: block;
+      height: 1.1in;
+      left: 0;
+      opacity: 1;
+      overflow: visible;
+      position: absolute;
+      width: 2.46in;
+      z-index: 0;
+    }
+    body.template-typographic-poster .mountains:before {
+      background: __ACCENT__;
+      border: 0;
+      content: "";
+      height: 0.68in;
+      left: 1.72in;
+      position: absolute;
+      top: -0.34in;
+      transform: skewX(-28deg);
+      width: 1.15in;
+    }
+    body.template-typographic-poster .mountains:after {
+      background: __ORANGE__;
+      border: 0;
+      content: "";
+      height: 0.42in;
+      left: 2.62in;
+      position: absolute;
+      top: -0.22in;
+      transform: skewX(-28deg);
+      width: 0.74in;
+    }
+    body.template-typographic-poster .page:not(.cover) {
+      background:
+        linear-gradient(90deg, __PRIMARY__ 0 0.13in, transparent 0.13in),
+        linear-gradient(180deg, transparent 0 92%, rgba(213,99,60,0.12) 92% 100%),
+        __SOFT__;
+      border-top: 0.06in solid __PRIMARY__;
+      padding-left: 0.24in;
+    }
+    body.template-typographic-poster .page-header {
+      background: transparent;
+      border-bottom: 0.04in solid __ORANGE__;
+      gap: 0.1in;
+      margin-bottom: 0.16in;
+      padding-bottom: 0.08in;
+    }
+    body.template-typographic-poster .page-header .badge,
+    body.template-typographic-poster .badge {
+      background: __PRIMARY__;
+      border-radius: 0;
+      color: #ffffff;
+    }
+    body.template-typographic-poster .page-header h2 {
+      color: __PRIMARY__;
+      font-family: __HEADING_FONT__;
+      font-size: 24px;
+      font-weight: 900;
+      letter-spacing: -0.03em;
+    }
+    body.template-typographic-poster .eyebrow {
+      color: __ACCENT__;
+      font-weight: 900;
+    }
+    body.template-typographic-poster .section,
+    body.template-typographic-poster .soft-card,
+    body.template-typographic-poster .goal-card {
+      background: __CARD__;
+      border: 0;
+      border-left: 0.06in solid __ORANGE__;
+      border-radius: 0;
+      box-shadow: 0 0.035in 0 rgba(20,35,60,0.12);
+    }
+    body.template-typographic-poster .section h3,
+    body.template-typographic-poster .goal-card h4 {
+      color: __PRIMARY__;
+      font-family: __HEADING_FONT__;
+      font-weight: 900;
+      letter-spacing: -0.01em;
+    }
+    body.template-typographic-poster .domain-title {
+      border-bottom: 0.02in solid rgba(20,35,60,0.24);
+      padding-bottom: 0.06in;
+    }
+    body.template-typographic-poster .domain-title .mini-dot,
+    body.template-typographic-poster .service-area-card .mini-dot {
+      background: __PRIMARY__;
+      border-radius: 0;
+      color: #ffffff;
+    }
+    body.template-typographic-poster .service-area-card {
+      background: __CARD__;
+      border: 0;
+      border-bottom: 1px solid rgba(0,0,0,0.2);
+      border-radius: 0;
+    }
+    body.template-typographic-poster th {
+      background: __PRIMARY__;
+      color: #ffffff;
+      font-size: 8px;
+      letter-spacing: 0.08em;
+    }
+    body.template-typographic-poster th,
+    body.template-typographic-poster td {
+      border-color: rgba(20,35,60,0.28);
+    }
+    body.template-typographic-poster .staff-checklist {
+      background: __CARD__;
+      border: 0.02in solid __ORANGE__;
+      border-radius: 0;
+    }
+    body.template-typographic-poster .staff-checklist h3 {
+      color: __PRIMARY__;
+    }
+
+    body.template-signal-atlas {
+      background: __SOFT__;
+      color: __TEXT__;
+    }
+    body.template-signal-atlas h1,
+    body.template-signal-atlas h2,
+    body.template-signal-atlas h3,
+    body.template-signal-atlas h4 {
+      color: __PRIMARY__;
+      font-family: __HEADING_FONT__;
+    }
+    body.template-signal-atlas .cover {
+      background: linear-gradient(180deg, __PRIMARY__ 0%, __PRIMARY__ 67%, __SOFT__ 67%, __SOFT__ 100%);
+      color: #ffffff;
+      overflow: hidden;
+    }
+    body.template-signal-atlas .cover:before {
+      border: 0.025in solid rgba(255,255,255,0.18);
+      border-radius: 50%;
+      content: "";
+      height: 3.9in;
+      position: absolute;
+      right: -1.15in;
+      top: -0.65in;
+      width: 3.9in;
+      z-index: 0;
+    }
+    body.template-signal-atlas .cover:after {
+      border: 0.018in solid rgba(255,255,255,0.12);
+      border-radius: 50%;
+      content: "";
+      height: 2.95in;
+      position: absolute;
+      right: -0.68in;
+      top: -0.18in;
+      width: 2.95in;
+      z-index: 0;
+    }
+    body.template-signal-atlas .cover-card {
+      display: block;
+      min-height: 9.55in;
+      padding: 0.48in;
+      position: relative;
+    }
+    body.template-signal-atlas .cover-card:before {
+      background: repeating-linear-gradient(90deg, transparent 0, transparent 0.23in, rgba(255,255,255,0.075) 0.235in, rgba(255,255,255,0.075) 0.245in);
+      content: "";
+      height: 5.45in;
+      left: 0;
+      position: absolute;
+      right: 0;
+      top: 0;
+      z-index: 0;
+    }
+    body.template-signal-atlas .cover-card:after {
+      background: radial-gradient(circle, __ORANGE__ 0, __ORANGE__ 0.095in, transparent 0.105in) 0 50% / 0.34in 0.34in repeat-x;
+      content: "";
+      height: 0.34in;
+      left: 0.48in;
+      position: absolute;
+      top: 5.83in;
+      width: 2.08in;
+      z-index: 1;
+    }
+    body.template-signal-atlas .cover-content {
+      left: 0.5in;
+      position: absolute;
+      top: 0.55in;
+      width: 5.62in;
+      z-index: 3;
+    }
+    body.template-signal-atlas .cover-content:before {
+      color: rgba(255,255,255,0.06);
+      content: attr(data-student-initials);
+      font-family: __HEADING_FONT__;
+      font-size: 3.65in;
+      font-weight: 900;
+      left: -0.12in;
+      letter-spacing: -0.18in;
+      line-height: 0.8;
+      position: absolute;
+      top: 0.18in;
+      z-index: -1;
+    }
+    body.template-signal-atlas .cover-icon {
+      background: transparent;
+      border: 0.018in solid rgba(255,255,255,0.46);
+      border-radius: 0;
+      box-shadow: none;
+      color: __ORANGE__;
+      height: 0.62in;
+      margin: 0 0 0.2in;
+      object-fit: contain;
+      width: 0.62in;
+    }
+    body.template-signal-atlas .brand-logo {
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      height: 0.62in;
+      margin: 0 0 0.2in;
+      object-fit: contain;
+      width: 0.9in;
+    }
+    body.template-signal-atlas .cover-kicker {
+      color: __ORANGE__;
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.28em;
+      margin: 0 0 0.04in;
+      text-align: left;
+    }
+    body.template-signal-atlas .cover-school {
+      color: rgba(255,255,255,0.7);
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      margin: 0 0 0.2in;
+      text-align: left;
+    }
+    body.template-signal-atlas .cover-card h1 {
+      color: #ffffff;
+      font-size: 62px;
+      letter-spacing: -0.06em;
+      line-height: 0.78;
+      text-align: left;
+    }
+    body.template-signal-atlas .cover-year {
+      background: transparent;
+      border-left: 0.12in solid __ACCENT__;
+      color: #ffffff;
+      font-size: 18px;
+      margin: 0.32in 0 0.18in;
+      padding: 0.02in 0 0.02in 0.16in;
+      text-align: left;
+    }
+    body.template-signal-atlas .cover-student {
+      color: __ORANGE__;
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+      margin: 0;
+      text-align: left;
+    }
+    body.template-signal-atlas .cover-bottom {
+      background: transparent;
+      border: 0;
+      margin: 0;
+      padding: 0;
+      position: static;
+    }
+    body.template-signal-atlas .cover-services,
+    body.template-signal-atlas .cover-services.service-count-5,
+    body.template-signal-atlas .cover-services.service-count-6,
+    body.template-signal-atlas .cover-services.service-count-7,
+    body.template-signal-atlas .cover-services.service-count-8 {
+      background: __CARD__;
+      border-top: 0.12in solid __ACCENT__;
+      bottom: 1.72in;
+      display: block;
+      left: 0.48in;
+      margin: 0;
+      max-width: none;
+      padding: 0.18in 0.18in 0.14in;
+      position: absolute;
+      width: 2.18in;
+      z-index: 4;
+    }
+    body.template-signal-atlas .cover-services:before {
+      color: __PRIMARY__;
+      content: "SERVICE AREAS";
+      display: block;
+      font-family: __HEADING_FONT__;
+      font-size: 8px;
+      font-weight: 800;
+      letter-spacing: 0.17em;
+      margin-bottom: 0.08in;
+    }
+    body.template-signal-atlas .service-chip,
+    body.template-signal-atlas .cover-services.service-count-5 .service-chip,
+    body.template-signal-atlas .cover-services.service-count-6 .service-chip,
+    body.template-signal-atlas .cover-services.service-count-7 .service-chip,
+    body.template-signal-atlas .cover-services.service-count-8 .service-chip {
+      border-bottom: 1px solid rgba(0,0,0,0.18);
+      color: __TEXT__;
+      display: block;
+      font-size: 7.6px;
+      font-weight: 700;
+      line-height: 1.15;
+      max-width: none;
+      padding: 0.055in 0;
+      text-align: left;
+      width: 100%;
+    }
+    body.template-signal-atlas .chip-dot {
+      display: none;
+    }
+    body.template-signal-atlas .meta-grid {
+      border-collapse: separate;
+      border-spacing: 0.05in;
+      bottom: 0.5in;
+      left: 3.06in;
+      margin: 0;
+      position: absolute;
+      table-layout: fixed;
+      width: 4.0in;
+      z-index: 4;
+    }
+    body.template-signal-atlas .meta-box {
+      background: __CARD__;
+      border: 0.018in solid __PRIMARY__;
+      border-radius: 0;
+      min-height: 0.72in;
+      overflow: hidden;
+      padding: 0.1in 0.11in;
+      width: 25%;
+    }
+    body.template-signal-atlas .meta-box:nth-child(2n) {
+      border-top: 0.12in solid __ORANGE__;
+    }
+    body.template-signal-atlas .meta-label {
+      color: __ACCENT__;
+      font-size: 7px;
+      letter-spacing: 0.11em;
+    }
+    body.template-signal-atlas .meta-value {
+      color: __TEXT__;
+      font-size: 10px;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+      word-break: normal;
+    }
+    body.template-signal-atlas .mountains {
+      background:
+        radial-gradient(circle at 0.72in 0.72in, __PRIMARY__ 0, __PRIMARY__ 0.7in, transparent 0.71in),
+        radial-gradient(circle at 1.72in 0.62in, __ACCENT__ 0, __ACCENT__ 0.5in, transparent 0.51in),
+        radial-gradient(circle at 2.5in 0.88in, __ORANGE__ 0, __ORANGE__ 0.31in, transparent 0.32in);
+      bottom: 0.12in;
+      display: block;
+      height: 1.46in;
+      left: 0.08in;
+      position: absolute;
+      width: 3.05in;
+      z-index: 1;
+    }
+    body.template-signal-atlas .mountains:before {
+      border: 0.025in solid __ACCENT__;
+      border-radius: 50%;
+      content: "";
+      height: 1.08in;
+      left: 1.04in;
+      position: absolute;
+      top: -0.02in;
+      width: 1.08in;
+    }
+    body.template-signal-atlas .mountains:after {
+      border: 0.018in solid __ORANGE__;
+      border-radius: 50%;
+      content: "";
+      height: 0.62in;
+      left: 2.12in;
+      position: absolute;
+      top: 0.26in;
+      width: 0.62in;
+    }
+    body.template-signal-atlas .cover-version-footer {
+      bottom: 0.18in;
+      color: __PRIMARY__;
+      display: block;
+      font-size: 7px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      left: auto;
+      position: absolute;
+      right: 0.48in;
+      text-transform: uppercase;
+      z-index: 5;
+    }
+    body.template-signal-atlas .page:not(.cover) {
+      background:
+        linear-gradient(90deg, __PRIMARY__ 0, __PRIMARY__ 0.19in, transparent 0.19in),
+        linear-gradient(180deg, rgba(0,0,0,0.02), transparent 1.6in),
+        __CARD__;
+      padding-left: 0.29in;
+    }
+    body.template-signal-atlas .page:not(.cover):before {
+      content: "";
+      display: none;
+    }
+    body.template-signal-atlas .signal-page-mark {
+      color: rgba(0,0,0,0.055);
+      font-family: __HEADING_FONT__;
+      font-size: 1.42in;
+      font-weight: 900;
+      line-height: 1;
+      pointer-events: none;
+      position: absolute;
+      right: 0.52in;
+      text-align: right;
+      top: 0.44in;
+      transform: none;
+      z-index: 1;
+    }
+    body.template-signal-atlas .page-header {
+      background: transparent;
+      border: 0;
+      border-bottom: 0.035in solid __PRIMARY__;
+      border-radius: 0;
+      margin-bottom: 0.16in;
+      padding: 0.08in 0.02in 0.1in;
+      position: relative;
+      z-index: 2;
+    }
+    body.template-signal-atlas .page-header:after {
+      background: __ORANGE__;
+      bottom: -0.035in;
+      content: "";
+      height: 0.035in;
+      left: 0;
+      position: absolute;
+      width: 1.18in;
+    }
+    body.template-signal-atlas .page-header .badge,
+    body.template-signal-atlas .page-header .badge.green,
+    body.template-signal-atlas .page-header .badge.purple,
+    body.template-signal-atlas .page-header .badge.orange {
+      background: __PRIMARY__;
+      border-radius: 0;
+      color: __ORANGE__;
+    }
+    body.template-signal-atlas .eyebrow {
+      color: __ACCENT__;
+    }
+    body.template-signal-atlas .section,
+    body.template-signal-atlas .soft-card,
+    body.template-signal-atlas .goal-card {
+      background: __CARD__;
+      border: 1px solid rgba(0,0,0,0.16);
+      border-radius: 0;
+      box-shadow: none;
+      position: relative;
+    }
+    body.template-signal-atlas .section:before,
+    body.template-signal-atlas .soft-card:before,
+    body.template-signal-atlas .goal-card:before {
+      background: __ACCENT__;
+      content: "";
+      height: 0.12in;
+      left: -1px;
+      position: absolute;
+      top: -1px;
+      width: 0.58in;
+    }
+    body.template-signal-atlas .goal-card.green,
+    body.template-signal-atlas .goal-card.purple {
+      background: __CARD__;
+      border-color: rgba(0,0,0,0.16);
+    }
+    body.template-signal-atlas .domain-title {
+      border-left: 0.1in solid __ORANGE__;
+      margin: 0.14in 0 0.08in;
+      padding-left: 0.1in;
+    }
+    body.template-signal-atlas .domain-title .mini-dot,
+    body.template-signal-atlas .domain-title .mini-dot.blue,
+    body.template-signal-atlas .domain-title .mini-dot.green,
+    body.template-signal-atlas .domain-title .mini-dot.purple,
+    body.template-signal-atlas .domain-title .mini-dot.orange {
+      background: __PRIMARY__;
+      border-radius: 0;
+      color: __ORANGE__;
+    }
+    body.template-signal-atlas th {
+      background: __PRIMARY__;
+      color: #ffffff;
+      font-size: 8px;
+      letter-spacing: 0.06em;
+    }
+    body.template-signal-atlas th:nth-child(2n) {
+      background: __ACCENT__;
+    }
+    body.template-signal-atlas th,
+    body.template-signal-atlas td {
+      border-color: rgba(0,0,0,0.2);
+    }
+    body.template-signal-atlas .notes-lines {
+      background: repeating-linear-gradient(to bottom, transparent 0, transparent 23px, rgba(0,0,0,0.2) 24px);
+      border: 1px solid rgba(0,0,0,0.2);
+      border-left: 0.1in solid __ORANGE__;
+      border-radius: 0;
+    }
+    body.template-signal-atlas .staff-checklist {
+      background: __CARD__;
+      border: 1px solid rgba(0,0,0,0.2);
+      border-left: 0.1in solid __ORANGE__;
+      border-radius: 0;
+    }
+
     body.template-modern-professional {
       background: #eef3f7;
       color: #14233c;
@@ -4405,63 +7072,16 @@ def _packet_styles(
     body.template-district-branding .page-header {
       border-bottom-color: __ORANGE__;
     }
-    body.template-mountain-illustrated .page:not(.cover) {
-      background:
-        linear-gradient(180deg, rgba(255,255,255,0.96), rgba(239,252,252,0.82)),
-        __CARD__;
-      border-bottom: 10px solid rgba(8, 125, 135, 0.28);
-    }
-    body.template-mountain-illustrated .page-header {
-      background: linear-gradient(90deg, rgba(8, 125, 135, 0.12), transparent);
-      border-bottom-color: #087d87;
-      border-radius: 14px 14px 0 0;
-      padding: 10px 12px;
-    }
-    body.template-mountain-illustrated .section,
-    body.template-mountain-illustrated .soft-card,
-    body.template-mountain-illustrated .goal-card {
-      background: rgba(255,255,255,0.88);
-      border-color: rgba(8, 125, 135, 0.28);
-      box-shadow: 0 5px 14px rgba(8, 73, 88, 0.08);
-    }
-    body.template-mountain-illustrated th {
-      background: #e1f4f6;
-      color: #073d58;
-    }
-    body.template-elementary-pop .page:not(.cover) {
-      background:
-        radial-gradient(circle at 94% 4%, rgba(239,121,0,0.09), transparent 14%),
-        radial-gradient(circle at 4% 96%, rgba(39,184,178,0.09), transparent 15%),
-        #fffdf8;
-    }
-    body.template-elementary-pop .page-header {
-      background: #fff7e8;
-      border: 1px solid rgba(214,155,45,0.28);
-      border-bottom: 4px solid __ORANGE__;
-      border-radius: 18px;
-      padding: 10px 12px;
-    }
-    body.template-elementary-pop .section,
-    body.template-elementary-pop .soft-card,
-    body.template-elementary-pop .goal-card,
-    body.template-elementary-pop .staff-checklist {
-      background: rgba(255,250,240,0.92);
-      border-color: rgba(214,155,45,0.3);
-      box-shadow: 0 5px 12px rgba(217,120,83,0.08);
-    }
-    body.template-elementary-pop th {
-      background: #fff0d8;
-      color: #275769;
-    }
     body.template-alpine-photo .page:not(.cover) {
       background:
         linear-gradient(90deg, #071827 0 0.18in, transparent 0.18in),
-        #ffffff;
+        linear-gradient(180deg, rgba(20,159,227,0.06), transparent 1.6in),
+        __CARD__;
     }
     body.template-alpine-photo .page-header {
       background: #0d1f35;
       border: 0;
-      border-left: 7px solid #149fe3;
+      border-left: 7px solid __ORANGE__;
       border-radius: 0 12px 12px 0;
       color: #ffffff;
       padding: 11px 13px;
@@ -4474,104 +7094,16 @@ def _packet_styles(
     body.template-alpine-photo .soft-card,
     body.template-alpine-photo .goal-card {
       border-color: #b8d8ee;
-      border-left: 5px solid #149fe3;
+      border-left: 5px solid __ORANGE__;
+    }
+    body.template-alpine-photo .goal-card.green,
+    body.template-alpine-photo .goal-card.purple {
+      background: __CARD__;
+      border-color: #b8d8ee;
+      border-left-color: __ORANGE__;
     }
     body.template-alpine-photo th {
       background: #0d1f35;
-      color: #ffffff;
-    }
-    body.template-botanical-frame .page:not(.cover) {
-      background:
-        radial-gradient(circle at 0 0, rgba(111,143,106,0.1), transparent 18%),
-        radial-gradient(circle at 100% 100%, rgba(111,143,106,0.08), transparent 18%),
-        #fbfaf5;
-      border: 1px solid rgba(111,143,106,0.3);
-    }
-    body.template-botanical-frame .page-header {
-      border: 1px solid rgba(111,143,106,0.35);
-      border-bottom: 4px solid #6f8f6a;
-      border-radius: 2px;
-      justify-content: center;
-      padding: 12px;
-      text-align: center;
-    }
-    body.template-botanical-frame .page-header h2,
-    body.template-botanical-frame h3 {
-      font-family: Georgia, "Times New Roman", serif;
-      letter-spacing: 0.04em;
-    }
-    body.template-botanical-frame .section,
-    body.template-botanical-frame .soft-card,
-    body.template-botanical-frame .goal-card {
-      background: rgba(255,255,255,0.75);
-      border-color: rgba(111,143,106,0.35);
-      border-radius: 2px;
-    }
-    body.template-botanical-frame th {
-      background: #edf4e9;
-      color: #3f544c;
-    }
-    body.template-chalkboard .page:not(.cover) {
-      background: #fbfbf7;
-      border: 4px solid #1f2933;
-    }
-    body.template-chalkboard .page-header {
-      background: #1f2933;
-      border: 0;
-      border-radius: 8px;
-      color: #f8fafc;
-      padding: 12px;
-    }
-    body.template-chalkboard .page-header h2,
-    body.template-chalkboard .page-header .eyebrow {
-      color: #f8fafc;
-    }
-    body.template-chalkboard .section,
-    body.template-chalkboard .soft-card,
-    body.template-chalkboard .goal-card {
-      border: 2px dashed #475569;
-      border-radius: 8px;
-      box-shadow: none;
-    }
-    body.template-chalkboard th {
-      background: #1f2933;
-      color: #f8fafc;
-    }
-    body.template-soft-organic .page:not(.cover) {
-      background:
-        radial-gradient(circle at 98% 8%, rgba(204,168,119,0.11), transparent 16%),
-        #fbf6ed;
-    }
-    body.template-soft-organic .page-header {
-      background: rgba(255,255,255,0.65);
-      border: 1px solid rgba(155,127,95,0.22);
-      border-bottom: 4px solid #9b7f5f;
-      border-radius: 22px;
-      padding: 12px 14px;
-    }
-    body.template-soft-organic .section,
-    body.template-soft-organic .soft-card,
-    body.template-soft-organic .goal-card {
-      background: rgba(255,255,255,0.72);
-      border-color: rgba(155,127,95,0.22);
-    }
-    body.template-soft-organic th {
-      background: #f1e4d0;
-      color: #5f4d3e;
-    }
-    body.template-purple-dot .page:not(.cover) {
-      background:
-        radial-gradient(circle, rgba(126, 87, 194, 0.16) 0 1.5px, transparent 1.5px) right top / 16px 16px,
-        #ffffff;
-    }
-    body.template-purple-dot .section,
-    body.template-purple-dot .soft-card,
-    body.template-purple-dot .goal-card {
-      border-left: 6px solid #6d3fc0;
-      border-radius: 0 12px 12px 0;
-    }
-    body.template-purple-dot th {
-      background: #6d3fc0;
       color: #ffffff;
     }
     .cover .chip-dot,
@@ -4589,6 +7121,20 @@ def _packet_styles(
       background-size: 67% auto !important;
       background-position: center center !important;
       background-repeat: no-repeat !important;
+    }
+    .custom-packet-page .custom-page-header {
+      align-items: center !important;
+      display: flex !important;
+      min-height: 0.36in !important;
+      padding: 0.08in 0.12in !important;
+      width: 100% !important;
+    }
+    .custom-packet-page .custom-page-header h2 {
+      display: block !important;
+      font-size: 18px;
+      line-height: 1.25;
+      max-width: none !important;
+      width: 100% !important;
     }
     """
     return (
@@ -4726,13 +7272,13 @@ def _service_icon_key(value: str) -> str:
 
 @lru_cache(maxsize=4)
 def _cover_icon_markup() -> str:
-    icon_path = Path(__file__).resolve().parents[2] / "assets" / "cover-icon" / "cover.svg"
+    icon_path = paths.builtin_assets_dir / "cover-icon" / "cover.svg"
     return _svg_icon_img(icon_path, "service-icon-img cover-fallback-icon", "#ffffff")
 
 
 @lru_cache(maxsize=64)
 def _service_icon_img_markup(icon_key: str, class_name: str, color: str, trim_container: bool = False) -> str:
-    icon_path = Path(__file__).resolve().parents[2] / "assets" / "service-icons" / f"{icon_key}.svg"
+    icon_path = paths.builtin_assets_dir / "service-icons" / f"{icon_key}.svg"
     if not icon_path.exists() and icon_key != "other":
         return _service_icon_img_markup("other", class_name, color, trim_container)
     return _svg_icon_img(icon_path, class_name, color, trim_container=trim_container)
@@ -4826,16 +7372,16 @@ def _service_icon_img(value: str, *, class_name: str = "service-icon-img", color
 
 def _service_icon_background(value: str, *, color: str = "#ffffff", trim_container: bool = False) -> str:
     icon_key = _service_icon_key(value)
-    icon_path = Path(__file__).resolve().parents[2] / "assets" / "service-icons" / f"{icon_key}.svg"
+    icon_path = paths.builtin_assets_dir / "service-icons" / f"{icon_key}.svg"
     if not icon_path.exists() and icon_key != "other":
-        icon_path = Path(__file__).resolve().parents[2] / "assets" / "service-icons" / "other.svg"
+        icon_path = paths.builtin_assets_dir / "service-icons" / "other.svg"
     uri = _svg_icon_data_uri(icon_path, color, trim_container=trim_container)
     return f"background-image: url({uri});" if uri else ""
 
 
 def _page_icon_img(icon_key: str, *, color: str = "#ffffff") -> str:
     normalized = re.sub(r"[^a-z0-9-]+", "-", icon_key.lower()).strip("-")
-    icon_path = Path(__file__).resolve().parents[2] / "assets" / "page-icons" / f"{normalized}.svg"
+    icon_path = paths.builtin_assets_dir / "page-icons" / f"{normalized}.svg"
     if not icon_path.exists():
         return ""
     class_name = f"page-icon-img page-icon-img-{normalized}"
@@ -4941,6 +7487,131 @@ def _accommodations_html(items: list[AccommodationDraft]) -> str:
     )
 
 
+def _accommodations_teacher_note_html(settings: AppSettings) -> str:
+    if not settings.accommodations_teacher_note_enabled:
+        return ""
+    title = settings.accommodations_teacher_note_title.strip() or "Teacher Responsibilities"
+    note = settings.accommodations_teacher_note.strip() or DEFAULT_ACCOMMODATIONS_TEACHER_NOTE
+    return f"""
+    <article class="accommodation-note accommodations-teacher-note">
+      <h3>{escape(title)}</h3>
+      <p>{escape(note).replace(chr(10), "<br>")}</p>
+    </article>
+    """
+
+
+def _parent_strengths_html(detail: ProjectDetail) -> str:
+    if (
+        not detail.accommodations_parent_strengths_enabled
+        or not detail.accommodations_parent_strengths.strip()
+    ):
+        return ""
+    return f"""
+    <article class="accommodation-note accommodations-parent-strengths">
+      <h3>Parent Perception of Student Strengths</h3>
+      <p>{escape(detail.accommodations_parent_strengths).replace(chr(10), "<br>")}</p>
+    </article>
+    """
+
+
+def _accommodations_student_details_html(student: StudentResponse | None) -> str:
+    student_name = student.name if student and student.name else "Student"
+    iep_end = _format_date(student.iep_end_date if student else None)
+    return f"""
+    <div class="accommodations-student-details">
+      <span><strong>Student:</strong> {escape(student_name)}</span>
+      <span><strong>IEP End:</strong> {escape(iep_end)}</span>
+    </div>
+    """
+
+
+def _custom_packet_page_html(page: PacketPageDraft, signal_page_mark_html: str) -> str:
+    title = page.title.strip() or "Custom Page"
+    body_text = page.body_text.strip()
+    blank_lines = "".join("<div></div>" for _ in range(18))
+    body_html = (
+        f'<article class="custom-page-body"><p>{escape(body_text).replace(chr(10), "<br>")}</p></article>'
+        if body_text
+        else f'<article class="custom-page-body blank-lines">{blank_lines}</article>'
+    )
+    return f"""
+    <section class="page custom-packet-page">
+      {signal_page_mark_html}
+      <div class="page-header green custom-page-header">
+        <h2>{escape(title)}</h2>
+      </div>
+      {body_html}
+    </section>
+    """
+
+
+def _accommodations_signature_page_html(
+    detail: ProjectDetail,
+    settings: AppSettings,
+    signal_page_mark_html: str,
+) -> str:
+    if (
+        not settings.accommodations_signature_page_enabled
+        or not any(item.text.strip() for item in detail.accommodations)
+    ):
+        return ""
+    title = (
+        settings.accommodations_signature_page_title.strip()
+        or "Accommodations Signature Page"
+    )
+    note = (
+        settings.accommodations_signature_page_note.strip()
+        or DEFAULT_ACCOMMODATIONS_SIGNATURE_NOTE
+    )
+    if settings.accommodations_signature_line_layout == "staff_position_date":
+        fields = [
+            ("Staff Member:", ""),
+            ("Position:", ""),
+            ("Date:", "date"),
+        ]
+        row_count = 15
+    else:
+        fields = [
+            ("Staff Member:", ""),
+            ("Date:", "date"),
+        ]
+        row_count = 15
+
+    row_html = ""
+    header_html = "".join(
+        f"""
+        <div class="signature-field {field_class}">
+          <div class="signature-label">{escape(label)}</div>
+        </div>
+        """
+        for label, field_class in fields
+    )
+    row_html = f'<div class="signature-row signature-header">{header_html}</div>'
+    for _ in range(row_count):
+        field_html = "".join(
+            f"""
+            <div class="signature-field {field_class}">
+              <div class="signature-line"></div>
+            </div>
+            """
+            for _, field_class in fields
+        )
+        row_html += f'<div class="signature-row">{field_html}</div>'
+
+    return f"""
+    <section class="page">
+      {signal_page_mark_html}
+      <div class="page-header green">
+        <span class="badge green page-icon-badge">{_page_icon_img("accommodations")}</span>
+        <h2>{escape(title)}</h2>
+      </div>
+      {_accommodations_student_details_html(detail.student)}
+      <p class="signature-note">{escape(note).replace(chr(10), "<br>")}</p>
+      <div class="signature-lines">{row_html}</div>
+    </section>
+    """
+
+
 def _behavior_plan_html(items: list[BehaviorPlanSectionDraft], legacy_text: str) -> str:
     visible = [item for item in sorted(items, key=lambda value: value.position) if item.text.strip()]
     if visible:
@@ -4967,9 +7638,15 @@ def _build_packet_html(
     packet_config: PacketVersionConfig | None = None,
     customization: ThemeCustomization | None = None,
 ) -> str:
+    app_settings = get_app_settings()
     student = detail.student
     student_name = student.name if student else "Student"
     service_names = sorted({area.name for area in detail.service_areas if area.name})
+    student_initials = (
+        student.initials
+        if student and student.initials
+        else derive_initials(student_name)
+    )
 
     rendered_pages: dict[str, str] = {}
     cover_chips = "".join(
@@ -4987,11 +7664,23 @@ def _build_packet_html(
     district_mark = (
         detail.brand_kit.district_name
         or detail.brand_kit.school_name
+        or (student.school if student and student.school else "")
         or "District Branding"
+    )
+    school_year = detail.school_year or "School Year"
+    cover_year_mark = (
+        str(student.iep_end_date.year)[-2:]
+        if student and student.iep_end_date
+        else ""
     )
     watermark_src = (
         detail.brand_kit.watermark_logo_relative_path
         if detail.brand_kit.watermark_enabled and detail.brand_kit.watermark_logo_relative_path
+        else ""
+    )
+    signal_page_mark_html = (
+        f'<div class="signal-page-mark">{escape(cover_year_mark)}</div>'
+        if packet_template_id == "signal_atlas" and cover_year_mark
         else ""
     )
     body_classes = [f"template-{packet_template_id.replace('_', '-')}"]
@@ -4999,42 +7688,121 @@ def _build_packet_html(
         body_classes.append("has-watermark")
     fallback_cover_icon = _cover_icon_markup()
     identity_html = f'<div class="cover-icon">{fallback_cover_icon or "SP"}</div>'
+    typographic_watermark_html = ""
     if detail.brand_kit.logo_relative_path:
         logo_src = detail.brand_kit.logo_relative_path.replace("\\", "/")
         identity_html = f'<img class="brand-logo cover-logo" src="{escape(logo_src)}" alt="">'
+    if packet_template_id == "typographic_poster":
+        if detail.brand_kit.logo_relative_path:
+            logo_src = detail.brand_kit.logo_relative_path.replace("\\", "/")
+            typographic_watermark_html = (
+                f'<img class="typographic-watermark logo" src="{escape(logo_src)}" alt="">'
+            )
+        else:
+            initials = (
+                student.initials
+                if student and student.initials
+                else derive_initials(student_name)
+            )
+            typographic_watermark_html = (
+                f'<div class="typographic-watermark text">{escape(initials or "SP")}</div>'
+            )
+    cover_version_footer_html = ""
+    if packet_template_id in {"editorial_ledger", "mid_century_classroom", "typographic_poster", "signal_atlas"}:
+        cover_version_footer_html = (
+            f'<p class="cover-version-footer">Packet version: {escape(packet_version_name)}</p>'
+        )
+    if packet_template_id == "editorial_ledger":
+        cover_meta_html = f"""
+        <table class="meta-grid editorial-meta-grid" aria-label="Student packet details">
+          <tbody>
+            <tr>
+              <td class="meta-box"><p class="meta-label">Grade</p><p class="meta-value">{escape(student.grade if student else "Not entered")}</p></td>
+              <td class="meta-box"><p class="meta-label">IEP end</p><p class="meta-value">{escape(_format_date(student.iep_end_date if student else None))}</p></td>
+              <td class="meta-box"><p class="meta-label">School</p><p class="meta-value">{escape(student.school if student and student.school else "Not entered")}</p></td>
+              <td class="meta-box"><p class="meta-label">Case manager</p><p class="meta-value">{escape(student.case_manager if student and student.case_manager else "Not entered")}</p></td>
+            </tr>
+          </tbody>
+        </table>
+        """
+    elif packet_template_id == "mid_century_classroom":
+        cover_meta_html = f"""
+        <table class="meta-grid" aria-label="Student packet details">
+          <tbody>
+            <tr>
+              <td class="meta-box"><p class="meta-label">Grade</p><p class="meta-value">{escape(student.grade if student else "Not entered")}</p></td>
+              <td class="meta-box"><p class="meta-label">IEP end</p><p class="meta-value">{escape(_format_date(student.iep_end_date if student else None))}</p></td>
+              <td class="meta-box"><p class="meta-label">School</p><p class="meta-value">{escape(student.school if student and student.school else "Not entered")}</p></td>
+              <td class="meta-box"><p class="meta-label">Case manager</p><p class="meta-value">{escape(student.case_manager if student and student.case_manager else "Not entered")}</p></td>
+            </tr>
+          </tbody>
+        </table>
+        """
+    elif packet_template_id == "typographic_poster":
+        cover_meta_html = f"""
+        <table class="meta-grid" aria-label="Student packet details">
+          <tbody>
+            <tr>
+              <td class="meta-box"><p class="meta-label">Grade</p><p class="meta-value">{escape(student.grade if student else "Not entered")}</p></td>
+              <td class="meta-box"><p class="meta-label">IEP end</p><p class="meta-value">{escape(_format_date(student.iep_end_date if student else None))}</p></td>
+              <td class="meta-box"><p class="meta-label">School</p><p class="meta-value">{escape(student.school if student and student.school else "Not entered")}</p></td>
+              <td class="meta-box"><p class="meta-label">Case manager</p><p class="meta-value">{escape(student.case_manager if student and student.case_manager else "Not entered")}</p></td>
+            </tr>
+          </tbody>
+        </table>
+        """
+    elif packet_template_id == "signal_atlas":
+        cover_meta_html = f"""
+        <table class="meta-grid" aria-label="Student packet details">
+          <tbody>
+            <tr>
+              <td class="meta-box"><p class="meta-label">Grade</p><p class="meta-value">{escape(student.grade if student else "Not entered")}</p></td>
+              <td class="meta-box"><p class="meta-label">IEP end</p><p class="meta-value">{escape(_format_date(student.iep_end_date if student else None))}</p></td>
+              <td class="meta-box"><p class="meta-label">School</p><p class="meta-value">{escape(student.school if student and student.school else "Not entered")}</p></td>
+              <td class="meta-box"><p class="meta-label">Case manager</p><p class="meta-value">{escape(_case_manager_name(student) or "Not entered")}</p></td>
+            </tr>
+          </tbody>
+        </table>
+        """
+    else:
+        cover_meta_html = f"""
+        <table class="meta-grid" aria-label="Student packet details">
+          <tbody>
+            <tr>
+              <td class="meta-box" colspan="2"><p class="meta-label">Grade</p><p class="meta-value">{escape(student.grade if student else "Not entered")}</p></td>
+              <td class="meta-box" colspan="2"><p class="meta-label">IEP end</p><p class="meta-value">{escape(_format_date(student.iep_end_date if student else None))}</p></td>
+              <td class="meta-box" colspan="2"><p class="meta-label">School</p><p class="meta-value">{escape(student.school if student and student.school else "Not entered")}</p></td>
+            </tr>
+            <tr>
+              <td class="meta-spacer"></td>
+              <td class="meta-box" colspan="2"><p class="meta-label">Case manager</p><p class="meta-value">{escape(student.case_manager if student and student.case_manager else "Not entered")}</p></td>
+              <td class="meta-box" colspan="2"><p class="meta-label">Version</p><p class="meta-value">{escape(packet_version_name)}</p></td>
+              <td class="meta-spacer"></td>
+            </tr>
+          </tbody>
+        </table>
+        """
     rendered_pages["cover"] = (
         f"""
         <section class="page cover">
           <div class="cover-card">
             <div class="cover-district-mark">{escape(district_mark)}</div>
-            <div class="cover-content">
+            {typographic_watermark_html}
+            <div class="cover-content" data-year-mark="{escape(cover_year_mark)}" data-student-initials="{escape(student_initials or "SP")}">
               {identity_html}
               <p class="cover-kicker">Special Education</p>
               <p class="cover-school">{escape(detail.brand_kit.school_name or (student.school if student and student.school else ""))}</p>
               <h1>Service<br>Packet</h1>
-              <div class="cover-year">{escape(detail.school_year or "School Year")}</div>
+              <div class="cover-year">{escape(school_year)}</div>
               <p class="cover-student">{escape(student_name)}</p>
             </div>
             <div class="cover-bottom">
               <div class="cover-details">
               <div class="cover-services service-count-{service_count}">{cover_chips}</div>
-              <table class="meta-grid" aria-label="Student packet details">
-                <tbody>
-                  <tr>
-                    <td class="meta-box" colspan="2"><p class="meta-label">Grade</p><p class="meta-value">{escape(student.grade if student else "Not entered")}</p></td>
-                    <td class="meta-box" colspan="2"><p class="meta-label">IEP end</p><p class="meta-value">{escape(_format_date(student.iep_end_date if student else None))}</p></td>
-                    <td class="meta-box" colspan="2"><p class="meta-label">School</p><p class="meta-value">{escape(student.school if student and student.school else "Not entered")}</p></td>
-                  </tr>
-                  <tr>
-                    <td class="meta-spacer"></td>
-                    <td class="meta-box" colspan="2"><p class="meta-label">Case manager</p><p class="meta-value">{escape(student.case_manager if student and student.case_manager else "Not entered")}</p></td>
-                    <td class="meta-box" colspan="2"><p class="meta-label">Version</p><p class="meta-value">{escape(packet_version_name)}</p></td>
-                    <td class="meta-spacer"></td>
-                  </tr>
-                </tbody>
-              </table>
+              {cover_meta_html}
               </div>
             </div>
+            {cover_version_footer_html}
             <div class="mountains"></div>
           </div>
         </section>
@@ -5049,6 +7817,7 @@ def _build_packet_html(
     rendered_pages["at_a_glance"] = (
         f"""
         <section class="page">
+          {signal_page_mark_html}
           <div class="page-header">
             <span class="badge page-icon-badge">{_page_icon_img("at-a-glance")}</span>
             <h2>At-a-Glance</h2>
@@ -5070,18 +7839,30 @@ def _build_packet_html(
         rendered_pages["accommodations"] = (
             f"""
             <section class="page">
+              {signal_page_mark_html}
               <div class="page-header green">
                 <span class="badge green page-icon-badge">{_page_icon_img("accommodations")}</span>
                 <h2>Accommodations/Modifications</h2>
               </div>
+              {_accommodations_student_details_html(student)}
+              {_accommodations_teacher_note_html(app_settings)}
               {_accommodations_html(detail.accommodations)}
+              {_parent_strengths_html(detail)}
             </section>
             """
         )
+        signature_page_html = _accommodations_signature_page_html(
+            detail,
+            app_settings,
+            signal_page_mark_html,
+        )
+        if signature_page_html:
+            rendered_pages["accommodations_signature"] = signature_page_html
     if detail.behavior_plan.strip() or any(item.text.strip() for item in detail.behavior_plan_sections):
         rendered_pages["behavior"] = (
             f"""
             <section class="page">
+              {signal_page_mark_html}
               <div class="page-header green">
                 <span class="badge green page-icon-badge">{_page_icon_img("behavior-plan")}</span>
                 <h2>Behavior Support</h2>
@@ -5119,6 +7900,7 @@ def _build_packet_html(
     rendered_pages["goal_summary"] = (
         f"""
         <section class="page">
+          {signal_page_mark_html}
           <div class="page-header">
             <span class="badge page-icon-badge">{_page_icon_img("goal-summary")}</span>
             <h2>Goal Summary</h2>
@@ -5130,6 +7912,7 @@ def _build_packet_html(
     rendered_pages["services"] = (
         f"""
         <section class="page">
+        {signal_page_mark_html}
         <div class="page-header">
             <span class="badge page-icon-badge">{_page_icon_img("service-info")}</span>
             <h2>Service Information</h2>
@@ -5156,12 +7939,11 @@ def _build_packet_html(
         <h3 style="margin-top: 18px;">Weekly Service Minutes</h3>
         """
         + _table(
-            ["Service", "Minutes per week", "Delivery", "Setting"],
+            ["Service", "Minutes per week", "Setting"],
             [
                 [
                     area.name,
                     str(area.minutes_per_week) if area.minutes_per_week is not None else "Not entered",
-                    _delivery_label(area.delivery_model),
                     area.setting or "Not entered",
                 ]
                 for area in detail.service_areas
@@ -5176,6 +7958,7 @@ def _build_packet_html(
         rendered_pages[f"data_collection_{sheet.id}_{goal.id}_{instance}"] = (
             f"""
             <section class="page">
+              {signal_page_mark_html}
               <div class="page-header {domain_class}">
                 <span class="badge {domain_class} service-icon-badge" style="{_service_area_icon_style(service_name, customization, theme_id=theme_id)} {_service_icon_background(service_name, color="#ffffff")}">&nbsp;</span>
                 <h2>Data Collection</h2>
@@ -5205,6 +7988,7 @@ def _build_packet_html(
         rendered_pages["observations"] = "".join(
             f"""
             <section class="page observation-page">
+              {signal_page_mark_html}
               <div class="page-header orange">
                 <span class="badge orange page-icon-badge">{_page_icon_img("observation")}</span>
                 <h2>{escape(sheet.title or "Observation Sheet")}</h2>
@@ -5223,6 +8007,7 @@ def _build_packet_html(
         rendered_pages["observations"] = (
             f"""
             <section class="page observation-page">
+              {signal_page_mark_html}
               <div class="page-header orange">
                 <span class="badge orange page-icon-badge">{_page_icon_img("observation")}</span>
                 <h2>Observations & Notes</h2>
@@ -5235,12 +8020,31 @@ def _build_packet_html(
             """
         )
 
-    return (
+    if packet_config is not None:
+        for page in packet_config.pages:
+            if page.page_type == "custom_text" and page.id not in rendered_pages:
+                rendered_pages[page.id] = _custom_packet_page_html(
+                    page,
+                    signal_page_mark_html,
+                )
+
+    html = (
         "<!doctype html><html><head><meta charset='utf-8'>"
         f"<title>{escape(detail.name)}</title><style>{_packet_styles(theme_id, customization or detail.theme_customization, watermark_src, _brand_body_font(detail.brand_kit), _brand_heading_font(detail.brand_kit))}</style>"
         f"</head><body class=\"{escape(' '.join(body_classes))}\">"
         + "".join(_ordered_packet_pages(rendered_pages, packet_config))
         + "</body></html>"
+    )
+    terminology = {
+        "ese": ("ESE", "Exceptional Student Education"),
+        "ess": ("ESS", "Exceptional Student Services"),
+        "sped": ("SpEd", "Special Education"),
+    }[app_settings.terminology_preference or "sped"]
+    acronym, full_title = terminology
+    return (
+        html.replace("SPECIAL EDUCATION", full_title.upper())
+        .replace("Special Education", full_title)
+        .replace("SpEd", acronym)
     )
 
 
@@ -5271,7 +8075,7 @@ def _export_directory(detail: ProjectDetail, project_id: str) -> Path:
         path = Path(configured).expanduser()
         if path.exists() and path.is_dir():
             return path
-    export_dir = settings.data_dir / "exports" / project_id
+    export_dir = paths.cache_dir / "generated-exports" / project_id
     export_dir.mkdir(parents=True, exist_ok=True)
     return export_dir
 
@@ -5280,7 +8084,7 @@ def _export_path_for_response(export: Export) -> Path:
     absolute = (export.metadata_json or {}).get("absolute_path")
     if isinstance(absolute, str) and absolute:
         return Path(absolute)
-    return settings.data_dir / export.relative_path
+    return paths.app_data_dir / export.relative_path
 
 
 def _export_response(export: Export, project_id: str) -> ExportResponse:
@@ -5327,7 +8131,7 @@ def _render_packet_pdf_bytes(
         customization=_customization_for_template(packet_template_id),
     )
     try:
-        return render_pdf(PdfRenderRequest(html=html, base_url=str(settings.data_dir)))
+        return render_pdf(PdfRenderRequest(html=html, base_url=str(paths.app_data_dir)))
     except RuntimeError as reason:
         raise HTTPException(status_code=503, detail=str(reason)) from reason
 
@@ -5335,8 +8139,8 @@ def _render_packet_pdf_bytes(
 def _sample_template_project_detail(draft: TemplatePreviewRequest) -> ProjectDetail:
     sample_student = StudentResponse(
         id="sample_student",
-        name="Jordan Rivera",
-        initials="JR",
+        name="Cecilia Halpert",
+        initials="CH",
         grade="5",
         school="Scranton Elementary",
         case_manager="Jim Halpert",
@@ -5353,7 +8157,6 @@ def _sample_template_project_detail(draft: TemplatePreviewRequest) -> ProjectDet
             name="Reading",
             setting="Special Education",
             minutes_per_week=180,
-            delivery_model="pull_out",
             notes="Small-group fluency and comprehension instruction.",
             position=0,
         ),
@@ -5362,7 +8165,6 @@ def _sample_template_project_detail(draft: TemplatePreviewRequest) -> ProjectDet
             name="Math",
             setting="Regular Education",
             minutes_per_week=90,
-            delivery_model="push_in",
             notes="In-class computation support.",
             position=1,
         ),
@@ -5371,7 +8173,6 @@ def _sample_template_project_detail(draft: TemplatePreviewRequest) -> ProjectDet
             name="Written Expression",
             setting="Special Education",
             minutes_per_week=60,
-            delivery_model="combined",
             notes="Planning, drafting, and revising support.",
             position=2,
         ),
@@ -5491,7 +8292,7 @@ def _sample_template_project_detail(draft: TemplatePreviewRequest) -> ProjectDet
         id="sample_template_project",
         name="Sample Student - 2026-2027",
         school_year="2026-2027",
-        default_export_filename="Jordan Rivera - Sample Packet.pdf",
+        default_export_filename="Cecilia Halpert - Sample Packet.pdf",
         student=sample_student,
         service_areas=service_areas,
         audiences=["case_manager", "general_education", "paraeducator"],
@@ -5545,8 +8346,8 @@ def _sample_template_project_detail(draft: TemplatePreviewRequest) -> ProjectDet
         brand_kit=BrandKit(
             id="sample_brand",
             name="Sample District",
-            district_name="Gardiner Public Schools",
-            school_name="Gardiner Elementary",
+            district_name="Scranton School District",
+            school_name="Scranton Elementary",
             heading_font="Poppins",
             body_font="Open Sans",
         ),
@@ -5577,7 +8378,7 @@ def preview_template_library_item(draft: TemplatePreviewRequest) -> bytes:
         customization=draft.customization,
     )
     try:
-        return render_pdf(PdfRenderRequest(html=html, base_url=str(settings.data_dir)))
+        return render_pdf(PdfRenderRequest(html=html, base_url=str(paths.app_data_dir)))
     except RuntimeError as reason:
         raise HTTPException(status_code=503, detail=str(reason)) from reason
 
@@ -5637,7 +8438,7 @@ def generate_pdf_export(
     output_path = _unique_output_path(export_dir, filename)
     output_path.write_bytes(pdf_bytes)
 
-    data_root = settings.data_dir.resolve()
+    data_root = paths.app_data_dir.resolve()
     relative_path = (
         output_path.relative_to(data_root).as_posix()
         if data_root in output_path.resolve().parents or output_path.resolve() == data_root
@@ -5721,7 +8522,7 @@ def generate_zip_export(
     output_path = _unique_output_path(export_dir, zip_filename)
     output_path.write_bytes(zip_bytes)
     packet = versions[0]
-    data_root = settings.data_dir.resolve()
+    data_root = paths.app_data_dir.resolve()
     relative_path = (
         output_path.relative_to(data_root).as_posix()
         if data_root in output_path.resolve().parents or output_path.resolve() == data_root
@@ -5799,7 +8600,7 @@ def create_project_backup(session: Session, project_id: str) -> BackupResponse:
         f"{_slug(detail.name)}-backup-"
         f"{created_at.strftime('%Y%m%d-%H%M%S')}.json"
     )
-    backup_dir = settings.data_dir / "backups" / project.id
+    backup_dir = paths.backups_dir / project.id
     backup_dir.mkdir(parents=True, exist_ok=True)
     output_path = backup_dir / filename
     payload = {
@@ -5812,7 +8613,7 @@ def create_project_backup(session: Session, project_id: str) -> BackupResponse:
         json.dumps(payload, indent=2, sort_keys=True),
         encoding="utf-8",
     )
-    relative_path = output_path.relative_to(settings.data_dir).as_posix()
+    relative_path = output_path.relative_to(paths.app_data_dir).as_posix()
     return BackupResponse(
         filename=filename,
         relative_path=relative_path,

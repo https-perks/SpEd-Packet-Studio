@@ -1,11 +1,5 @@
-export type Audience =
-  | "case_manager"
-  | "general_education"
-  | "paraeducator"
-  | "related_services"
-  | "substitute";
+export type Audience = string;
 
-export type DeliveryModel = "push_in" | "pull_out" | "combined" | "other";
 export type WorkflowStep =
   | "student_setup"
   | "goals"
@@ -56,7 +50,6 @@ export interface ServiceAreaDraft {
   name: string;
   setting: string;
   minutes_per_week: number | null;
-  delivery_model: DeliveryModel | null;
   notes: string;
   position: number;
 }
@@ -92,6 +85,8 @@ export interface StudentSetupDraft {
   service_areas: ServiceAreaDraft[];
   audiences: Audience[];
   accommodations: AccommodationDraft[];
+  accommodations_parent_strengths_enabled: boolean;
+  accommodations_parent_strengths: string;
   behavior_plan: string;
   behavior_plan_sections: BehaviorPlanSectionDraft[];
   related_service_providers: RelatedServiceProviderDraft[];
@@ -160,12 +155,19 @@ export interface PacketVersion {
   readonly audience: string;
 }
 
+export interface PacketVersionDraft {
+  id: string | null;
+  name: string;
+  audience: string;
+}
+
 export interface PacketPageDraft {
   id: string;
   title: string;
   page_type: string;
   enabled: boolean;
   position: number;
+  body_text?: string;
 }
 
 export interface AssetPlacementDraft {
@@ -195,9 +197,6 @@ export interface PacketTemplateOption {
   readonly id: string;
   readonly name: string;
   readonly description: string;
-  readonly category: string;
-  readonly cover_style: string;
-  readonly best_for: string;
   readonly page_count_hint: string;
 }
 
@@ -213,7 +212,6 @@ export interface PacketTemplateLibraryItem extends PacketTemplateOption {
 export interface PacketTemplateLibraryDraft {
   name: string;
   description: string;
-  category: string;
   base_template_id: string;
   theme_id: string;
   customization: ThemeCustomization;
@@ -300,13 +298,24 @@ export interface CaseManagerProfile {
   notes: string;
 }
 
+export type TerminologyPreference = "sped" | "ese" | "ess";
+
 export interface AppSettings {
+  terminology_preference: TerminologyPreference | null;
   default_school_year: string;
   default_theme_id: string;
   default_packet_template_id: string;
   default_export_settings: ExportSettings;
+  packet_versions: PacketVersionDraft[];
   default_packet_pages: PacketPageDraft[];
   default_observation_checklist: string[];
+  accommodations_teacher_note_enabled: boolean;
+  accommodations_teacher_note_title: string;
+  accommodations_teacher_note: string;
+  accommodations_signature_page_enabled: boolean;
+  accommodations_signature_page_title: string;
+  accommodations_signature_page_note: string;
+  accommodations_signature_line_layout: "teacher_coach_date" | "staff_position_date";
   default_data_sheet_columns: DataSheetColumnDraft[];
   data_sheet_templates: DataSheetDraft[];
   service_area_presets: ServiceAreaDraft[];
@@ -364,6 +373,8 @@ export interface ProjectDetail {
   readonly service_areas: readonly (ServiceAreaDraft & { readonly id: string })[];
   readonly audiences: readonly Audience[];
   readonly accommodations: readonly AccommodationDraft[];
+  readonly accommodations_parent_strengths_enabled: boolean;
+  readonly accommodations_parent_strengths: string;
   readonly behavior_plan: string;
   readonly behavior_plan_sections: readonly BehaviorPlanSectionDraft[];
   readonly related_service_providers: readonly RelatedServiceProviderDraft[];
